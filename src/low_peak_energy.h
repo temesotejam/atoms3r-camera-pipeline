@@ -57,7 +57,7 @@ class Feedback {
     const float desired=std::fmin(.12f,std::fmax(0.f,sum/3.f));
     bias_+=std::fmax(-.01f,std::fmin(.01f,desired-bias_));
   }
-  bool constrain(uint32_t ms,uint16_t cap,float target,bool foot_valid,float left,float right) const {
+  bool eligibleForCorrection(uint32_t ms,uint16_t cap,float target,bool foot_valid,float left,float right) const {
     return !disabled_ && command_valid_ && ms>=command_ms_ && ms-command_ms_<=1500 && cap>=60 &&
        last_observed_ms_ && ms>=last_observed_ms_ && ms-last_observed_ms_<=1500 &&
        negative_ms_ && ms>=negative_ms_ && ms-negative_ms_<=1500 && negative_>=3.2f &&

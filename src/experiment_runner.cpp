@@ -3319,7 +3319,7 @@ wheel_work_energy_control::Choice ExperimentRunner::chooseWheelWork(
         state.rate_dps>=12.f && state.rate_dps<=40.f && state.wheel_rpm>=-3.f && state.wheel_rpm<=200.f &&
         state.battery_mv>=7400.f && state.battery_mv<=8060.f && std::fabs(run_cg_shift_mm_)<=1e-6f;
     if(state.target_deg==8.f && choice.valid && choice.current_ma==400 && choice.branch==5 && !coast_only && low_peak_state_ok) {
-      const bool eligible=low_peak_feedback_.constrain(event.zero_cross_time_ms,actual_cap,target_mj,
+      const bool eligible=low_peak_feedback_.eligibleForCorrection(event.zero_cross_time_ms,actual_cap,target_mj,
           foot_energy_.valid(),foot_energy_.leftMean(),foot_energy_.rightMean());
       const bool recovering=!eligible && low_peak_feedback_.recover(event.zero_cross_time_ms,actual_cap);
       if(eligible || recovering) {
