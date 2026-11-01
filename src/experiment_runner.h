@@ -392,6 +392,10 @@ private:
   wheel_work_energy_control::Choice __attribute__((noinline)) chooseFootPhaseWidth(
       const PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
       const wheel_work_energy_control::Choice& baseline,uint16_t width,float fast_v) const;
+  bool __attribute__((noinline)) selectFootPhaseOutput(
+      PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,uint32_t t_test_ms,float fast_v,
+      wheel_work_energy_control::Choice& choice,int16_t& current,
+      const lateral_energy::CurrentTable*& table);
   void __attribute__((noinline)) choosePeakMpc(PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
       float fast_v,wheel_work_energy_control::Choice& choice,int16_t& current,
       const lateral_energy::CurrentTable*& table) const;

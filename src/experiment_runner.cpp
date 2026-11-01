@@ -3388,6 +3388,45 @@ wheel_work_energy_control::Choice ExperimentRunner::chooseFootPhaseWidth(
   return c;
 }
 
+bool ExperimentRunner::selectFootPhaseOutput(
+    PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,uint32_t t_test_ms,float fast_v,
+    wheel_work_energy_control::Choice& work_choice,int16_t& selected_current_mA,
+    const lateral_energy::CurrentTable*& selected_current_table) {
+  bool phase_skip_output=false;
+  if(wheelWorkMode() && event.target_peak_deg==8.f && event.physical_next_peak_side>0) {
+    foot_phase_cap_.tick(t_test_ms);
+    event.foot_phase_baseline_ms=work_choice.valid ? work_choice.width_ms : 0;
+    const auto phase_state=foot_phase_cap_.state();
+    const bool intervention=phase_state==foot_phase_cap::State::Trial ||
+        phase_state==foot_phase_cap::State::Hold || phase_state==foot_phase_cap::State::Release;
+    const bool phase_sensors_fresh=peak_error_adaptation::speedUsable(event.pre_input_wheel_speed_rpm,
+        event.pre_input_wheel_speed_valid,event.pre_input_wheel_speed_age_us) &&
+        event.vbat_mV>=7000 && event.vbat_mV<=8120;
+    if(!work_choice.valid || work_choice.branch!=5 || !phase_sensors_fresh) {
+      if(intervention) {foot_phase_cap_.modeChanged();phase_skip_output=true;}
+      else foot_phase_cap_.limit(t_test_ms,event.foot_phase_baseline_ms,
+          work_choice.current_ma,work_choice.command_sign,work_choice.allowed_cap_ms,false,event.target_energy_j*1000.f);
+    } else {
+      const uint16_t limited=foot_phase_cap_.limit(t_test_ms,work_choice.width_ms,work_choice.current_ma,
+          work_choice.command_sign,work_choice.allowed_cap_ms,true,event.target_energy_j*1000.f);
+      event.foot_phase_requested_ms=limited;
+      if(foot_phase_cap_.requireNeutral()) {
+        requestEmergencyStop("foot_phase_cap_unresolved");phase_skip_output=true;
+      } else if(limited==0 && work_choice.width_ms>0) phase_skip_output=true;
+      else if(limited!=work_choice.width_ms) {
+        auto candidate=chooseFootPhaseWidth(event,work_choice,limited,fast_v);
+        if(!candidate.valid) {foot_phase_cap_.modeChanged();phase_skip_output=true;}
+        else {
+          work_choice=candidate;selected_current_mA=400;
+          selected_current_table=&positive_current_probe_tables_[1];
+          event.foot_phase_selected=true;
+        }
+      }
+    }
+  }
+  return phase_skip_output;
+}
+
 void ExperimentRunner::choosePeakMpc(PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
     float fast_v,wheel_work_energy_control::Choice& work_choice,int16_t& selected_current_mA,
     const lateral_energy::CurrentTable*& selected_current_table) const {
@@ -3675,38 +3714,8 @@ void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(uint32_t t_test_
     work_choice=chooseWheelWork(event,fast_v,&event.rate_support_diagnostic,
         &selected_current_mA,&selected_current_table,
         event.target_peak_deg==8.f && event.physical_next_peak_side>0 ? gradual_start_.positiveCapMs() : 100);
-  bool phase_skip_output=false;
-  if(work_mode && event.target_peak_deg==8.f && event.physical_next_peak_side>0) {
-    foot_phase_cap_.tick(t_test_ms);
-    event.foot_phase_baseline_ms=work_choice.valid ? work_choice.width_ms : 0;
-    const auto phase_state=foot_phase_cap_.state();
-    const bool intervention=phase_state==foot_phase_cap::State::Trial ||
-        phase_state==foot_phase_cap::State::Hold || phase_state==foot_phase_cap::State::Release;
-    const bool phase_sensors_fresh=peak_error_adaptation::speedUsable(event.pre_input_wheel_speed_rpm,
-        event.pre_input_wheel_speed_valid,event.pre_input_wheel_speed_age_us) &&
-        event.vbat_mV>=7000 && event.vbat_mV<=8120;
-    if(!work_choice.valid || work_choice.branch!=5 || !phase_sensors_fresh) {
-      if(intervention) {foot_phase_cap_.modeChanged();phase_skip_output=true;}
-      else foot_phase_cap_.limit(t_test_ms,event.foot_phase_baseline_ms,
-          work_choice.current_ma,work_choice.command_sign,work_choice.allowed_cap_ms,false,event.target_energy_j*1000.f);
-    } else {
-      const uint16_t limited=foot_phase_cap_.limit(t_test_ms,work_choice.width_ms,work_choice.current_ma,
-          work_choice.command_sign,work_choice.allowed_cap_ms,true,event.target_energy_j*1000.f);
-      event.foot_phase_requested_ms=limited;
-      if(foot_phase_cap_.requireNeutral()) {
-        requestEmergencyStop("foot_phase_cap_unresolved");phase_skip_output=true;
-      } else if(limited==0 && work_choice.width_ms>0) phase_skip_output=true;
-      else if(limited!=work_choice.width_ms) {
-        auto candidate=chooseFootPhaseWidth(event,work_choice,limited,fast_v);
-        if(!candidate.valid) {foot_phase_cap_.modeChanged();phase_skip_output=true;}
-        else {
-          work_choice=candidate;selected_current_mA=400;
-          selected_current_table=&positive_current_probe_tables_[1];
-          event.foot_phase_selected=true;
-        }
-      }
-    }
-  }
+  const bool phase_skip_output=selectFootPhaseOutput(event,t_test_ms,fast_v,work_choice,
+      selected_current_mA,selected_current_table);
   if(phase_skip_output) {
     event.reason=status_.emergency_stop ? Config::ENERGY_CONTROL_AUTONOMOUS_REASON_ESTOP_OR_STATE :
         Config::ENERGY_CONTROL_AUTONOMOUS_REASON_WORK_OUTSIDE_SUPPORT;
