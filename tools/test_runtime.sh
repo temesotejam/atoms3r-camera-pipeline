@@ -7,6 +7,11 @@ g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_peak_mpc.cpp -o /tmp/t
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_gradual_start.cpp -o /tmp/test_gradual_start
 /tmp/test_gradual_start
 
+g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_low_peak_energy.cpp -o /tmp/test_low_peak_energy
+g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_low_peak_log_replay.cpp -o /tmp/test_low_peak_log_replay
+python3 tools/test_low_peak_evidence.py /tmp/test_low_peak_log_replay
+/tmp/test_low_peak_energy
+
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_wheel_speed_balance.cpp -o /tmp/test_wheel_speed_balance
 python3 tools/test_wheel_speed_evidence.py /tmp/test_wheel_speed_balance
 /tmp/test_wheel_speed_balance

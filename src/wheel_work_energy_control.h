@@ -39,6 +39,8 @@ struct Prediction {
 };
 struct Choice {
   float walking_loss_mj = NAN;
+  bool low_peak_selected=false;uint16_t low_peak_base_width_ms=0;
+  float low_peak_base_prediction_mj=NAN,low_peak_applied_bias_mj=0;
   bool valid = false;
   bool target_below_reachable = false;
   bool target_above_reachable = false;

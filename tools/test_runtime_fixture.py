@@ -61,7 +61,7 @@ header = converter.parse_header(data)
 metadata = converter.expand_tables(json.loads(data[110:110+header['metadata_json_size']], parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value))))
 assert metadata['metadata_json_final_bytes'] == header['metadata_json_size']
 assert not metadata['metadata_event_detail_truncated']
-assert metadata['firmware_revision']=='1.0.57-low-speed-energy'
+assert metadata['firmware_revision']=='1.0.58-low-peak-energy'
 for manifest in ('site/manifest.json','site/manifest-freefoot-runtime-v2.json'):
     cfg=json.loads(Path(manifest).read_text())
     assert cfg['version']==metadata['firmware_revision']
@@ -297,6 +297,10 @@ for work_first, suffix in ((False, '.fallback-first.rwlog'), (True, '.work-first
             assert abs(event['foot_energy_bias']-.08)<.00001
             assert event['foot_energy_left_px']==20 and event['foot_energy_right_px']==2
             assert event['foot_energy_valid'] is True and event['foot_energy_phase']==3 and event['foot_energy_reason']==4
+            assert abs(event['low_peak_bias_mj']-.08)<.00001 and event['low_peak_active'] is True
+            assert event['low_peak_selected'] is True and event['low_peak_base_width_ms']==80
+            assert abs(event['low_peak_base_prediction_mj']-.281)<.00001
+            assert abs(event['low_peak_applied_bias_mj']-.08)<.00001
             assert abs(event['target_energy_j']-.00076)<.000001
             assert work_metadata['walking_energy_loss']['independent_validation'] is False
             assert work_metadata['walking_energy_loss']['low_rpm_coast_observations']==26

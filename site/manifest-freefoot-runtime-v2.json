@@ -1,6 +1,6 @@
 {
   "name": "AtomS3R Lateral Energy Control",
-  "version": "1.0.57-low-speed-energy",
+  "version": "1.0.58-low-peak-energy",
   "new_install_improv_wait_time": 0,
   "builds": [
     {

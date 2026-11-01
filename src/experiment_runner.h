@@ -12,6 +12,7 @@
 #include "lateral_energy_control.h"
 #include "wheel_work_energy_control.h"
 #include "walking_energy_loss.h"
+#include "low_peak_energy.h"
 #include "wheel_speed_balance.h"
 #include "gradual_start.h"
 #include "foot_balance_adaptive.h"
@@ -516,6 +517,8 @@ private:
   wheel_work_energy_control::NegativeFeedback work_negative_feedback_;
   walking_energy_loss::Feedback walking_loss_feedback_;
   walking_energy_loss::LowSpeedGuard walking_low_speed_guard_;
+  low_peak_energy::Feedback low_peak_feedback_;
+  float work_positive_low_applied_bias_mj_=0.f;
   bool work_walking_pending_=false,work_walking_low_pending_=false;
   wheel_work_energy_control::NegativeAssistFeedback work_negative_assist_feedback_;
   target12_state_work::Controller work_target12_controller_;
