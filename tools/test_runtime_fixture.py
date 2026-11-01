@@ -61,7 +61,7 @@ header = converter.parse_header(data)
 metadata = converter.expand_tables(json.loads(data[110:110+header['metadata_json_size']], parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value))))
 assert metadata['metadata_json_final_bytes'] == header['metadata_json_size']
 assert not metadata['metadata_event_detail_truncated']
-assert metadata['firmware_revision']=='1.0.56-foot-phase-guard'
+assert metadata['firmware_revision']=='1.0.57-low-speed-energy'
 for manifest in ('site/manifest.json','site/manifest-freefoot-runtime-v2.json'):
     cfg=json.loads(Path(manifest).read_text())
     assert cfg['version']==metadata['firmware_revision']
@@ -299,6 +299,10 @@ for work_first, suffix in ((False, '.fallback-first.rwlog'), (True, '.work-first
             assert event['foot_energy_valid'] is True and event['foot_energy_phase']==3 and event['foot_energy_reason']==4
             assert abs(event['target_energy_j']-.00076)<.000001
             assert work_metadata['walking_energy_loss']['independent_validation'] is False
+            assert work_metadata['walking_energy_loss']['low_rpm_coast_observations']==26
+            assert work_metadata['walking_energy_loss']['low_rpm_branch']==11
+            assert work_metadata['walking_energy_loss']['low_rpm_pulse_gain_validated'] is False
+            assert event['work_control_branch']==11
         else:
             assert event['arrival_energy_model_revision'] == work_metadata['wheel_work_model_revision']
         if event['work_control_branch'] == 4:

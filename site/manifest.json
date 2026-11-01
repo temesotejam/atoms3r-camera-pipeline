@@ -1,6 +1,6 @@
 {
   "name": "AtomS3R Lateral Energy Control",
-  "version": "1.0.56-foot-phase-guard",
+  "version": "1.0.57-low-speed-energy",
   "new_install_improv_wait_time": 0,
   "builds": [
     {

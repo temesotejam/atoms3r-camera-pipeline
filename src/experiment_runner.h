@@ -382,6 +382,8 @@ private:
       const lateral_energy::CurrentTable*& table) const;
   void __attribute__((noinline)) applyFootEnergyTarget(PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,uint32_t t_ms);
   void __attribute__((noinline)) finishFootEnergyDecision(PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,uint32_t t_ms);
+  void __attribute__((noinline)) capturePendingWheelWork(const PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
+      const wheel_work_energy_control::Choice& choice,uint16_t selected_width_ms,float prediction_bias_j);
   void __attribute__((noinline)) selectPositiveCurrentBatch(
       PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
       int16_t& selected_current_mA,
@@ -513,7 +515,8 @@ private:
   float inverse_negative_pending_bias_j_ = 0.f;
   wheel_work_energy_control::NegativeFeedback work_negative_feedback_;
   walking_energy_loss::Feedback walking_loss_feedback_;
-  bool work_walking_pending_=false;
+  walking_energy_loss::LowSpeedGuard walking_low_speed_guard_;
+  bool work_walking_pending_=false,work_walking_low_pending_=false;
   wheel_work_energy_control::NegativeAssistFeedback work_negative_assist_feedback_;
   target12_state_work::Controller work_target12_controller_;
   float work_pending_battery_mv_=NAN;

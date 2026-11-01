@@ -74,3 +74,15 @@ assert len(latest)>=25
 fresh=[r for r in latest if r['peak_rpm_valid'] and r['peak_speed_age_us']<=30000]
 assert len(fresh)>=25 and sum(r['peak_rpm']>=30 and r['peak_deg']<r['target_deg'] for r in fresh)>=20
 print('Recorded 60 ms arrivals: fresh peak speed and below-target evidence PASS')
+
+# Four-run post-hoc coast matches; samples within a run are correlated and
+# the set contains no powered observations in the new domain.
+low=json.loads(Path('tools/fixtures/walking_low_rpm_139_319_443_387.json').read_text())['records']
+assert len(low)==26 and len({r['run'] for r in low})==4
+assert all(not r['output'] and r['pulse_ms']==0 and r['posthoc_match'] for r in low)
+assert all(240<=r['rpm']<274.9 and 13.75<=r['rate_dps']<=37.8 and 4.3006<=r['previous_deg']<=7.65 for r in low)
+errors=[.09046158+.00018973*r['rate_dps']**2-potential(r['peak_deg']) for r in low]
+assert (sum(x*x for x in errors)/len(errors))**.5<.028
+text=''.join(' '.join(str(r[k]) for k in ('rate_dps','rpm','vbat_mv','previous_deg','peak_deg'))+'\n' for r in low)
+subprocess.run([sys.argv[1],'low'],input=text,text=True,check=True)
+print('Four runs: 26 post-hoc low-rpm coast arrivals; powered effect not established PASS')

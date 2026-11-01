@@ -91,6 +91,47 @@ int main(int argc,char** argv) {
   Feedback interrupted;assert(interrupted.observe(raw,raw,target));assert(interrupted.observe(raw,raw,target));
   for(int i=0;i<50 && interrupted.capMs()<50;++i)assert(interrupted.observe(raw,raw,target,interrupted.capMs(),100,true));
   interrupted.interrupt();assert(interrupted.capMs()==45);
+  // The low-rpm domain starts with two matched coast peaks. Nominal-region
+  // arrivals never count as low-rpm coasts, and evidence expires or is reset.
+  State ls{30,260,7990,true,5.2f};ls.absolute_reference=true;
+  LowSpeedGuard lowguard;
+  assert(lowSpeedSupported(ls) && !supported(ls));
+  auto lc=choose(g,ls,table,0,280,target,f,0,100,&lowguard,1000);
+  assert(lc.valid && lc.branch==11 && lc.width_ms==0 && lc.cross_condition);
+  const float lraw=lc.energy_mj;
+  lowguard.observe(lraw,lraw,target,0,true,1200);
+  assert(lowguard.capMs(1500,target)==0);
+  lowguard.bridge(lraw,lraw,target,290,true,1800);
+  lowguard.observe(lraw,lraw,target,0,true,2400);
+  assert(lowguard.capMs(2500,target)==10);
+  assert(lowguard.capMs(2500,target+.04f)==0);
+  lc=choose(g,ls,table,0,280,target,f,0,100,&lowguard,2500);
+  assert(lc.valid && lc.branch==11 && lc.width_ms<=10);
+  lowguard.observe(lraw,lraw,target,10,true,3000);
+  assert(lowguard.capMs(3100,target)==10);
+  lowguard.observe(lraw,lraw,target,10,true,3800);
+  assert(lowguard.capMs(3900,target)==15);
+  assert(lowguard.capMs(8001,target)==0);
+  lowguard.bridge(lraw,lraw+.07f,target,290,true,4000);
+  assert(lowguard.capMs(4100,target)==0); // intervening model mismatch
+  lowguard.observe(lraw,lraw,target,0,true,4300);
+  lowguard.observe(lraw,lraw,target,0,true,5100);
+  lowguard.observe(target,target,target,10,true,5900); // overshoot locks extension
+  lowguard.observe(lraw,lraw,target,0,true,6700);
+  assert(lowguard.capMs(6800,target)==0);
+  LowSpeedGuard worse_low;
+  worse_low.observe(lraw,lraw,target,0,true,1000);
+  worse_low.observe(lraw,lraw,target,0,true,1800);
+  worse_low.observe(lraw-.04f,lraw,target,10,true,2600);
+  worse_low.observe(lraw-.04f,lraw,target,10,true,3400);
+  assert(worse_low.capMs(3500,target)==0); // deteriorating matched residual
+  LowSpeedGuard missing_cycle;missing_cycle.observe(lraw,lraw,target,0,true,1000);
+  missing_cycle.bridge(lraw,lraw,target,290,true,3000);
+  missing_cycle.observe(lraw,lraw,target,0,true,3800);
+  assert(missing_cycle.capMs(3900,target)==0); // missed intermediate cycle
+  LowSpeedGuard missing;missing.observe(lraw,lraw,target,0,true,1000);
+  missing.interrupt();missing.observe(lraw,lraw,target,0,true,1800);
+  assert(missing.capMs(1900,target)==0);
   if(argc>1) {
     float rate,rpm,battery,previous,peak;unsigned count=0;float squared=0;
     while(std::cin>>rate>>rpm>>battery>>previous>>peak) {
@@ -100,7 +141,8 @@ int main(int argc,char** argv) {
       const float error=pred.energy_mj-1000.f*lateral_energy::potential(g,peak);
       squared+=error*error;++count;
     }
-    if(argv[1][0]=='f') assert(count==18&&std::sqrt(squared/count)<.043f);
+    if(argv[1][0]=='l') assert(count==26&&std::sqrt(squared/count)<.028f);
+    else if(argv[1][0]=='f') assert(count==18&&std::sqrt(squared/count)<.043f);
     else if(argv[1][0]=='t') assert(count==31&&std::sqrt(squared/count)<.031f);
     else assert(count==32&&std::sqrt(squared/count)<.019f);
   }

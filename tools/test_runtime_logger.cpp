@@ -203,7 +203,7 @@ int main(int argc,char** argv){
       z.work_brake_cap_ms = z.work_control_branch==4 ? (z.work_prediction_cross_condition ? 30 : 25) : 0;
       z.work_bias_samples = z.physical_next_peak_side>0 ? 2 : z.work_control_branch==4 ? 3 : 0;
       if(i==255) {
-        z.work_control_branch=10;z.work_prediction_cross_condition=true;
+        z.work_control_branch=11;z.work_prediction_cross_condition=true;
         z.energy_model_extrapolated=true;z.predicted_loss_j=.00014f;
         z.foot_balance_target_deg=8.2f;z.foot_balance_left_mean=2.5f;
         z.foot_balance_right_mean=.2f;z.target_energy_j=.00076f;
