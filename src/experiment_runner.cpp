@@ -2874,6 +2874,17 @@ void ExperimentRunner::processFootPhaseCycle(uint32_t now_ms) {
       peak ? peak->amplitude : NAN,known,known && decision->executed,
       peak && foot_phase_observer_.valid(now_ms));
 }
+void ExperimentRunner::recordFootPhasePeak(int8_t physical_side,uint32_t peak_ms,float amplitude_deg) {
+  foot_balance_.peak(physical_side,peak_ms);
+  foot_energy_.peak(physical_side,peak_ms);
+  if(physical_side<0) {
+    auto& p=phase_negative_peaks_[phase_negative_peak_next_];
+    p.ms=peak_ms;p.amplitude=amplitude_deg;
+    phase_negative_peak_next_=(phase_negative_peak_next_+1)%8;
+  }
+  foot_phase_observer_.peak(status_.run_id,physical_side,peak_ms);
+  processFootPhaseCycle(millis()-run_start_ms_);
+}
 bool ExperimentRunner::recordEnergyControlAutonomousPeak(uint32_t peak_ms, int8_t physical_side,
                                                             float amplitude_deg, float detector_peak_angle_deg) {
   if (!logger_ || physical_side == 0 || !isfinite(amplitude_deg) || !isfinite(detector_peak_angle_deg) ||
@@ -2993,17 +3004,8 @@ bool ExperimentRunner::recordEnergyControlAutonomousPeak(uint32_t peak_ms, int8_
   event.integral_plus_j = energy_control_autonomous_integral_plus_j_;
   event.integral_minus_j = energy_control_autonomous_integral_minus_j_;
   logger_->addEnergyControlAutonomousPeakEvent(event);
-  if(wheelWorkMode() && energy_control_autonomous_target_peak_deg_==8.f) {
-    foot_balance_.peak(physical_side,peak_ms);
-    foot_energy_.peak(physical_side,peak_ms);
-    if(physical_side<0) {
-      auto& p=phase_negative_peaks_[phase_negative_peak_next_];
-      p.ms=peak_ms;p.amplitude=amplitude_deg;
-      phase_negative_peak_next_=(phase_negative_peak_next_+1)%8;
-    }
-    foot_phase_observer_.peak(status_.run_id,physical_side,peak_ms);
-    processFootPhaseCycle(millis()-run_start_ms_);
-  }
+  if(wheelWorkMode() && energy_control_autonomous_target_peak_deg_==8.f)
+    recordFootPhasePeak(physical_side,peak_ms,amplitude_deg);
   return true;
 }
 void ExperimentRunner::updateEnergyControlAutonomousMotion(uint32_t now_ms) {
@@ -3714,8 +3716,8 @@ void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(uint32_t t_test_
     work_choice=chooseWheelWork(event,fast_v,&event.rate_support_diagnostic,
         &selected_current_mA,&selected_current_table,
         event.target_peak_deg==8.f && event.physical_next_peak_side>0 ? gradual_start_.positiveCapMs() : 100);
-  const bool phase_skip_output=selectFootPhaseOutput(event,t_test_ms,fast_v,work_choice,
-      selected_current_mA,selected_current_table);
+  const bool phase_skip_output=work_mode && event.target_peak_deg==8.f && event.physical_next_peak_side>0 &&
+      selectFootPhaseOutput(event,t_test_ms,fast_v,work_choice,selected_current_mA,selected_current_table);
   if(phase_skip_output) {
     event.reason=status_.emergency_stop ? Config::ENERGY_CONTROL_AUTONOMOUS_REASON_ESTOP_OR_STATE :
         Config::ENERGY_CONTROL_AUTONOMOUS_REASON_WORK_OUTSIDE_SUPPORT;

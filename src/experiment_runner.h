@@ -163,6 +163,7 @@ private:
   unsigned phase_negative_peak_next_=0,phase_negative_decision_next_=0;
   uint32_t phase_observer_sequence_=0;
   void __attribute__((noinline)) processFootPhaseCycle(uint32_t now_ms);
+  void __attribute__((noinline)) recordFootPhasePeak(int8_t physical_side,uint32_t peak_ms,float amplitude_deg);
   wheel_speed_balance::Controller wheel_speed_balance_;
   uint16_t foot_frame_run_id_=0;
   uint32_t foot_frame_ms_=0;
