@@ -6,14 +6,14 @@
 // run 50881356. All energies here are mJ. Never add this loss to the old
 // side-bias correction: this is a separate, mutually exclusive branch.
 namespace walking_energy_loss {
-constexpr char kRevision[]="walking_coast_voltage_transfer_v2";
+constexpr char kRevision[]="walking_coast_three_runs_v3";
 inline bool supported(const wheel_work_energy_control::State& s) {
   return s.absolute_reference && s.target_deg==8.f &&
       wheel_work_energy_control::freshFinite(s) &&
-      s.rate_dps>=24.7827f && s.rate_dps<=36.752f &&
-      s.wheel_rpm>=511.45f && s.wheel_rpm<=603.21f &&
+      s.rate_dps>=24.7827f && s.rate_dps<=36.875f &&
+      s.wheel_rpm>=446.5f && s.wheel_rpm<=603.21f &&
       s.battery_mv>=7000.f && s.battery_mv<=8120.f &&
-      s.previous_peak_deg>=4.70603f && s.previous_peak_deg<=6.11884f;
+      s.previous_peak_deg>=4.3006f && s.previous_peak_deg<=6.11884f;
 }
 inline float coastMj(float rate_dps) {
   return .09046158f+.00018973f*rate_dps*rate_dps;
@@ -53,9 +53,9 @@ __attribute__((noinline)) inline wheel_work_energy_control::Choice choose(
       !std::isfinite(cg_mm)||std::fabs(cg_mm)>1e-6f) return c;
   const float previous_mj=1000.f*lateral_energy::potential(g,s.previous_peak_deg);
   const float passive=coastMj(s.rate_dps)+feedback.biasMj();
-  // Decreasing peak energy is represented explicitly as Uprev-Lwalk.
+  // Signed Uprev-Ecoast may be negative from motion or energy exchange.
   const float loss=previous_mj-passive;
-  if(!std::isfinite(loss)||loss<0.f||passive<=0.f)return c;
+  if(!std::isfinite(loss)||passive<=0.f)return c;
   for(uint16_t ms=0;ms<=feedback.capMs();ms=ms==0 ? 10 : ms+1) {
     const float q=ms ? lateral_energy::charge(table,ms,initial_ma,goal_ma) : 0.f;
     if(!std::isfinite(q)||q<0.f||q>25.f)continue;

@@ -17,8 +17,12 @@
       <div class="badges"><span>ESP32-S3</span><span>BMI270 400/200 Hz</span><span>RWLOG v56</span><span>MEKF</span><span>左右足角度</span></div>
     </header>
     <section class="panel important">
+      <h2>1.0.45：歩行時のRW回転数範囲を拡張</h2>
+      <p>バージョン <strong>1.0.45-walking-rpm</strong>。新しい歩行ログの無入力データを使い、負側の予測に使えるRW回転数と直前角度の範囲を広げました。足マーカーによる左右差の調整を引き継ぎます。入力の効果は実機で確認してください。</p>
+    </section>
+    <section class="panel important">
       <h2>1.0.44：歩行中の足の動きを左右で調整</h2>
-      <p>バージョン <strong>1.0.44-foot-balance</strong>。目標8°の仕事制御で、左右の足マーカーの変化を比較して、小さい側の目標を少しずつ調整します。足の検出が欠けた場合は更新を待ちます。左右バランス・前進・直進の効果は実機で未検証です。</p>
+      <p>1.0.44の変更：目標8°の仕事制御で、左右の足マーカーの変化を比較して、小さい側の目標を少しずつ調整します。足の検出が欠けた場合は更新を待ちます。左右バランス・前進・直進の効果は実機で未検証です。</p>
     </section>
     <section class="panel important">
       <h2>1.0.43：歩行時の補償を電圧変化に対応</h2>

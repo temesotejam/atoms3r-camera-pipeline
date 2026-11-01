@@ -28,3 +28,13 @@ assert abs(sum(errors)/len(errors))<.002
 assert (sum(e*e for e in errors)/len(errors))**.5 < .021
 assert all(24.7827<=v['rate_dps']<=36.752 and 511.45<=v['rpm']<=603.21 and 7000<=v['vbat_mv']<=8120 for v in second)
 print('Second run: 31 unpowered arrivals, held-out coast accuracy and expanded bounds PASS')
+
+third=json.loads(Path('tools/fixtures/walking_loss_47647215.json').read_text())['records']
+assert len(third)==31 and all(v['pulse_ms']==0 and not v['output'] for v in third)
+errors=[.09046158+.00018973*v['rate_dps']**2-potential(v['peak_deg']) for v in third]
+assert abs(sum(errors)/len(errors)+.02013527)<.00001
+assert (sum(e*e for e in errors)/len(errors))**.5 < .031
+assert all(24.7827<=v['rate_dps']<=36.875 and 446.5<=v['rpm']<=603.21 and 4.3006<=v['previous_deg']<=6.11884 for v in third)
+text=''.join(' '.join(str(x[k]) for k in ('rate_dps','rpm','vbat_mv','previous_deg','peak_deg'))+'\n' for x in third)
+subprocess.run([sys.argv[1],'third'],input=text,text=True,check=True)
+print('Third run: 31 independent unpowered arrivals and expanded bounds PASS')
