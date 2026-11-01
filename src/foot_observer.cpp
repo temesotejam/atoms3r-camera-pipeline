@@ -167,7 +167,7 @@ void FootObserver::loop() {
 static String number(float v) { return isfinite(v) ? String(v, 5) : String("null"); }
 void FootObserver::appendMetadata(PsramString& json) const {
   const auto s = snapshot();
-  json += "\"foot_observation\":{\"revision\":\"freefoot_runtime_v2_0477\",\"observation_only\":false,\"balance_control_scope\":\"work_mode_target8_only\",";
+  json += "\"foot_observation\":{\"revision\":\"freefoot_runtime_v2_0477\",\"observation_only\":false,\"balance_control_scope\":\"work_mode_target8_peak_marker_energy_allocation_v1\",";
   json += "\"detector\":\"" + String(appcfg::kWhiteDetectorRevision) + "\",";
   json += "\"weak_candidate_confirmation\":{\"frames\":" + String(appcfg::kWhiteReacquireFrames);
   json += ",\"min_x_step_px\":" + String(appcfg::kWhiteWeakXStepPx, 1);

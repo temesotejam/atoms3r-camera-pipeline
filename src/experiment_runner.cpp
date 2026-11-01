@@ -2530,7 +2530,7 @@ void ExperimentRunner::resetEnergyControlAutonomous() {
   work_negative_feedback_ = wheel_work_energy_control::NegativeFeedback{};
   walking_loss_feedback_=walking_energy_loss::Feedback{};
   work_walking_pending_=false;
-  foot_balance_.reset(status_.run_id);wheel_speed_balance_.reset();gradual_start_.reset();foot_frame_run_id_=0;
+  foot_balance_.reset(status_.run_id);foot_energy_.reset(status_.run_id);wheel_speed_balance_.reset();gradual_start_.reset();foot_frame_run_id_=0;
   foot_frame_left_valid_=foot_frame_right_valid_=false;pending_target_energy_j_=NAN;
   for (auto& feedback : work_positive_feedback_) feedback=wheel_work_energy_control::SideEnergyFeedback{};
   work_negative_assist_feedback_=wheel_work_energy_control::NegativeAssistFeedback{};
@@ -2842,11 +2842,12 @@ void ExperimentRunner::updateEnergyControlAutonomousPulse(uint32_t now_ms) {
     // were completed by the bounded fast selector at the accepted zero crossing.
   }
 }
-void ExperimentRunner::observeFootFrame(uint16_t run_id,uint32_t frame_ms,bool left_valid,bool right_valid,float left_deg,float right_deg) {
+void ExperimentRunner::observeFootFrame(uint16_t run_id,uint32_t frame_ms,bool left_valid,bool right_valid,float left_deg,float right_deg,float left_px,float right_px) {
   foot_frame_run_id_=run_id;foot_frame_ms_=frame_ms;
   foot_frame_left_valid_=left_valid;foot_frame_right_valid_=right_valid;
   foot_frame_left_=left_deg;foot_frame_right_=right_deg;
   foot_balance_.frame(run_id,frame_ms,left_valid,right_valid,left_deg,right_deg);
+  foot_energy_.frame(run_id,frame_ms,left_valid && std::isfinite(left_px),right_valid && std::isfinite(right_px),left_px,right_px);
 }
 bool ExperimentRunner::recordEnergyControlAutonomousPeak(uint32_t peak_ms, int8_t physical_side,
                                                             float amplitude_deg, float detector_peak_angle_deg) {
@@ -2963,6 +2964,7 @@ bool ExperimentRunner::recordEnergyControlAutonomousPeak(uint32_t peak_ms, int8_
   logger_->addEnergyControlAutonomousPeakEvent(event);
   if(wheelWorkMode() && energy_control_autonomous_target_peak_deg_==8.f) {
     foot_balance_.peak(physical_side,peak_ms);
+    foot_energy_.peak(physical_side,peak_ms);
   }
   return true;
 }
@@ -3316,7 +3318,9 @@ void ExperimentRunner::choosePeakMpc(PsramLogger::EnergyControlAutonomousZeroCro
       const peak_mpc::State state{event.zero_cross_abs_rate_dps,event.pre_input_wheel_speed_rpm,
           event.previous_peak_amplitude_deg,static_cast<float>(event.vbat_mV),event.physical_next_peak_side};
       if(peak_error_adaptation::speedUsable(event.pre_input_wheel_speed_rpm,event.pre_input_wheel_speed_valid,event.pre_input_wheel_speed_age_us)) {
-        const float next_target=gradual_start_.target()+(event.physical_next_peak_side>0 ? foot_balance_.negativeOffsetDeg() : foot_balance_.positiveOffsetDeg());
+        const int next_side=-event.physical_next_peak_side;
+        const float next_energy=controlPotential(next_side*gradual_start_.target())*foot_energy_.factor(next_side);
+        const float next_target=controlAngle(next_energy,next_side);
         const auto result=peak_mpc::choose(state,work_choice.width_ms,alternative.width_ms,event.foot_balance_target_deg,next_target);
         if(result.valid) {
           event.mpc_valid=true;event.mpc_alternate=result.alternate;
@@ -3326,6 +3330,17 @@ void ExperimentRunner::choosePeakMpc(PsramLogger::EnergyControlAutonomousZeroCro
       }
     }
   }
+}
+
+void ExperimentRunner::applyFootEnergyTarget(PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,uint32_t t_ms) {
+  foot_energy_.update(t_ms);
+  const int side=event.physical_next_peak_side;
+  const float base=controlPotential(side*gradual_start_.target());
+  event.target_energy_j=base*foot_energy_.factor(side);
+  event.foot_balance_target_deg=controlAngle(event.target_energy_j,side);
+  event.foot_energy_bias=foot_energy_.bias();
+  event.foot_energy_left_px=foot_energy_.leftMean();event.foot_energy_right_px=foot_energy_.rightMean();
+  event.foot_energy_valid=foot_energy_.valid();
 }
 
 void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(uint32_t t_test_ms, float rate_dps,
@@ -3448,18 +3463,15 @@ void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(uint32_t t_test_
   event.cg_shift_mm=wheelWorkMode() ? run_cg_shift_mm_ : 0.f;
   event.target_energy_j = wheelWorkMode() ? controlPotential(event.physical_next_peak_side * event.target_peak_deg) : lateral_target_energy_j_;
   if(wheelWorkMode() && event.target_peak_deg==8.f) {
-    const float offset=event.physical_next_peak_side<0 ? foot_balance_.negativeOffsetDeg() : foot_balance_.positiveOffsetDeg();
-    const float adjusted=gradual_start_.target()+offset;
     event.startup_target_deg=gradual_start_.target();
     event.startup_positive_cap_ms=gradual_start_.positiveCapMs();
-    event.foot_balance_target_deg=adjusted;
     event.foot_balance_left_mean=foot_balance_.leftMean();
     event.foot_balance_right_mean=foot_balance_.rightMean();
     if(foot_frame_run_id_==status_.run_id && t_test_ms>=foot_frame_ms_ && t_test_ms-foot_frame_ms_<=150) {
       event.foot_balance_left_deg=foot_frame_left_valid_ ? foot_frame_left_ : NAN;
       event.foot_balance_right_deg=foot_frame_right_valid_ ? foot_frame_right_ : NAN;
     }
-    event.target_energy_j=controlPotential(event.physical_next_peak_side*adjusted);
+    applyFootEnergyTarget(event,accepted_cross_ms);
   }
   event.free_next_peak_amplitude_deg = energy_bridge_enabled_ ? bridge_free_angle :
       lateral_energy::angle(lateral_energy_geometry_,event.passive_energy_j);

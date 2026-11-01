@@ -15,6 +15,7 @@
 #include "wheel_speed_balance.h"
 #include "gradual_start.h"
 #include "foot_balance_adaptive.h"
+#include "foot_energy_balance.h"
 #include "target12_state_work.h"
 #include "peak_error_adaptation.h"
 #include "upright_reference.h"
@@ -40,7 +41,7 @@ public:
   void serviceFast();
   void RW_HOT_CODE update();
   void updateImuDynamicBetaContext();
-  void observeFootFrame(uint16_t run_id,uint32_t frame_ms,bool left_valid,bool right_valid,float left_deg,float right_deg);
+  void observeFootFrame(uint16_t run_id,uint32_t frame_ms,bool left_valid,bool right_valid,float left_deg,float right_deg,float left_px,float right_px);
   void setLoopDt(uint32_t dt_us) { status_.loop_dt_us = dt_us; }
   void recordTimingProbeLoop(uint32_t imu_update_us, uint32_t runner_update_us, uint32_t core1_path_us);
 
@@ -149,6 +150,7 @@ public:
 private:
   gradual_start::Controller gradual_start_;
   foot_balance_adaptive::Controller foot_balance_;
+  foot_energy_balance::Controller foot_energy_;
   wheel_speed_balance::Controller wheel_speed_balance_;
   uint16_t foot_frame_run_id_=0;
   uint32_t foot_frame_ms_=0;
@@ -378,6 +380,7 @@ private:
   void __attribute__((noinline)) choosePeakMpc(PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
       float fast_v,wheel_work_energy_control::Choice& choice,int16_t& current,
       const lateral_energy::CurrentTable*& table) const;
+  void __attribute__((noinline)) applyFootEnergyTarget(PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,uint32_t t_ms);
   void __attribute__((noinline)) selectPositiveCurrentBatch(
       PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
       int16_t& selected_current_mA,

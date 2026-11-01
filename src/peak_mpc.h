@@ -44,7 +44,7 @@ inline bool cost(const State& s,float width,float target1,float target2,float& b
 }
 inline Result choose(const State& state,float baseline_ms,float alternate_ms,float target1=8.f,float target2=8.f) {
   Result r;
-  if(alternate_ms<baseline_ms-5.f||alternate_ms>=baseline_ms||!std::isfinite(target1)||!std::isfinite(target2)||target1<4.5f||target1>9.f||target2<4.5f||target2>9.f)return r;
+  if(alternate_ms<baseline_ms-5.f||alternate_ms>=baseline_ms||!std::isfinite(target1)||!std::isfinite(target2)||target1<3.5f||target1>10.f||target2<3.5f||target2>10.f)return r;
   float a=0,b=0,p1=0,p2=0,r1=0,r2=0;
   if(!cost(state,baseline_ms,target1,target2,a,p1,r1)||!cost(state,alternate_ms,target1,target2,b,p2,r2))return r;
   r.valid=true;r.alternate=b+.005f<a;r.second_peak=r.alternate?p2:p1;r.mean_rpm=r.alternate?r2:r1;

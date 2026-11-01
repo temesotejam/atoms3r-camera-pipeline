@@ -368,6 +368,8 @@ class PsramLogger {
     float foot_balance_left_mean = NAN, foot_balance_right_mean = NAN;
     float startup_target_deg=NAN;
     uint16_t startup_positive_cap_ms=0;
+    float foot_energy_bias=NAN,foot_energy_left_px=NAN,foot_energy_right_px=NAN;
+    bool foot_energy_valid=false;
     float target_energy_j = NAN;
     float delta_energy_required_j = NAN;
     float kinetic_energy_j=NAN, predicted_loss_j=NAN, integral_energy_j=NAN;

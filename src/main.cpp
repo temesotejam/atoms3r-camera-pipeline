@@ -197,7 +197,9 @@ static bool controlStep(void*) {
     if(f.sequence!=foot_observation_sequence && f.frame_us>=measurement_epoch_us && f.timestamp_valid) {
       foot_observation_sequence=f.sequence;
       runner.observeFootFrame(f.run_id,static_cast<uint32_t>((f.frame_us-measurement_epoch_us)/1000),
-          f.left_valid,f.right_valid,f.left_deg,f.right_deg);
+          f.left_valid,f.right_valid,f.left_deg,f.right_deg,
+          (f.zero_ready && f.frame_valid && f.left_valid) ? fs.left_zero-f.left_x : NAN,
+          (f.zero_ready && f.frame_valid && f.right_valid) ? fs.right_zero-f.right_x : NAN);
     }
   }
   runner.update();
