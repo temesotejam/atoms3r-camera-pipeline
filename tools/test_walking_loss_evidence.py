@@ -49,3 +49,12 @@ assert all(18.45<=v['rate_dps']<=37.30 and 362<=v['rpm']<=603.21 and 4.3006<=v['
 text=''.join(' '.join(str(x[k]) for k in ('rate_dps','rpm','vbat_mv','previous_deg','peak_deg'))+'\n' for x in unpowered)
 subprocess.run([sys.argv[1],'fourth'],input=text,text=True,check=True)
 print('Fourth run: 18 unpowered replay, 13 powered observations and expanded bounds PASS')
+
+# Latest run: low-rpm unsupported coasts; no causal estimate of powered gain.
+fifth=json.loads(Path('tools/fixtures/walking_55836070.json').read_text())['records']
+coast=[v for v in fifth if not v['output'] and v['pulse_ms']==0 and 323.9<=v['rpm']<362 and 18.45<=v['rate_dps']<=37.3]
+assert len(coast)==8
+errors=[.09046158+.00018973*v['rate_dps']**2-potential(v['peak_deg']) for v in coast]
+assert (sum(e*e for e in errors)/len(errors))**.5 < .025
+assert len([v for v in fifth if v['pulse_ms']==40 and v['output']])==15
+print('Fifth run: eight low-rpm unpowered observations and 15 capped powered arrivals PASS')

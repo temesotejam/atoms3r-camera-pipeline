@@ -35,6 +35,34 @@ class Controller {
     last_update_ms_=peak_ms;have_update_=true;
     return true;
   }
+  // The camera frame arrives after exposure. Wait for the first frame at or
+  // after a peak and use the closest valid exposure within 100 ms. This avoids
+  // consistently sampling the rising flank at peak-confirmation time.
+  void frame(uint16_t run_id,uint32_t ms,bool left_valid,bool right_valid,float left,float right) {
+    if(run_id!=run_id_) return;
+    if(pending_ && ms>=pending_ms_) {
+      const bool valid=pending_side_>0 ? left_valid : right_valid;
+      const float value=pending_side_>0 ? left : right;
+      if(valid && std::isfinite(value) && ms-pending_ms_<=100 &&
+         (!candidate_valid_ || ms-pending_ms_<pending_ms_-candidate_ms_)) {
+        candidate_valid_=true;candidate_ms_=ms;candidate_value_=value;
+      }
+      if(candidate_valid_) observe(pending_side_,std::fmax(0.f,candidate_value_),true,run_id_,pending_ms_,candidate_ms_);
+      pending_=false;
+    }
+    frame_ms_=ms;frame_left_=left;frame_right_=right;
+    frame_left_valid_=left_valid;frame_right_valid_=right_valid;have_frame_=true;
+  }
+  void peak(int side,uint32_t ms) {
+    if(side!=1 && side!=-1) return;
+    if(pending_ && candidate_valid_) observe(pending_side_,std::fmax(0.f,candidate_value_),true,run_id_,pending_ms_,candidate_ms_);
+    pending_=true;pending_side_=side;pending_ms_=ms;candidate_valid_=false;
+    if(have_frame_ && frame_ms_<=ms && ms-frame_ms_<=100) {
+      const bool valid=side>0 ? frame_left_valid_ : frame_right_valid_;
+      const float value=side>0 ? frame_left_ : frame_right_;
+      if(valid && std::isfinite(value)) {candidate_valid_=true;candidate_ms_=frame_ms_;candidate_value_=value;}
+    }
+  }
   float negativeOffsetDeg() const { return negative_offset_; }
   float positiveOffsetDeg() const { return positive_offset_; }
   float leftMean() const { return count_[0]==3 ? (values_[0][0]+values_[0][1]+values_[0][2])/3.f : NAN; }
@@ -46,5 +74,10 @@ class Controller {
   unsigned next_[2]={},count_[2]={};
   uint32_t last_peak_ms_=0,last_update_ms_=0;
   bool have_last_=false,have_update_=false;
+  bool have_frame_=false,frame_left_valid_=false,frame_right_valid_=false;
+  bool pending_=false,candidate_valid_=false;
+  uint32_t frame_ms_=0,pending_ms_=0,candidate_ms_=0;
+  int pending_side_=0;
+  float frame_left_=NAN,frame_right_=NAN,candidate_value_=NAN;
 };
 }

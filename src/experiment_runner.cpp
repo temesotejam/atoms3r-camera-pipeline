@@ -2845,6 +2845,7 @@ void ExperimentRunner::observeFootFrame(uint16_t run_id,uint32_t frame_ms,bool l
   foot_frame_run_id_=run_id;foot_frame_ms_=frame_ms;
   foot_frame_left_valid_=left_valid;foot_frame_right_valid_=right_valid;
   foot_frame_left_=left_deg;foot_frame_right_=right_deg;
+  foot_balance_.frame(run_id,frame_ms,left_valid,right_valid,left_deg,right_deg);
 }
 bool ExperimentRunner::recordEnergyControlAutonomousPeak(uint32_t peak_ms, int8_t physical_side,
                                                             float amplitude_deg, float detector_peak_angle_deg) {
@@ -2956,10 +2957,7 @@ bool ExperimentRunner::recordEnergyControlAutonomousPeak(uint32_t peak_ms, int8_
   event.integral_minus_j = energy_control_autonomous_integral_minus_j_;
   logger_->addEnergyControlAutonomousPeakEvent(event);
   if(wheelWorkMode() && energy_control_autonomous_target_peak_deg_==8.f) {
-    const bool left=physical_side>0;
-    const float value=left ? foot_frame_left_ : foot_frame_right_;
-    const bool valid=left ? foot_frame_left_valid_ : foot_frame_right_valid_;
-    foot_balance_.observe(physical_side,fmaxf(0.f,value),valid && isfinite(value),foot_frame_run_id_,peak_ms,foot_frame_ms_);
+    foot_balance_.peak(physical_side,peak_ms);
   }
   return true;
 }

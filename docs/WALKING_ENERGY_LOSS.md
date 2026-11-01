@@ -69,3 +69,8 @@
 正側の入力不足まで解消するとはいえない。
 
 追加ログ42306015には無入力18回と25 ms入力13回があり、無入力の既存式RMSEは0.0416 mJ。異なる条件であるため両群の差は入力効果の独立した同定ではない。足の左右差による目標調整を引き継ぐ。
+
+
+### 2026-11-01: run 55836070
+
+Eight unpowered negative arrivals at 323.90–360.33 rpm show coast prediction RMSE 0.0249 mJ; this extends the lower rpm bound to 323.9. These are observations under walking, not proof of the loss mechanism. The run also reached 40 ms fifteen times while the negative-side peaks remained below target. The cap may increase by 5 ms after each two accepted below-target capped arrivals, up to 60 ms; 45–60 ms remains unvalidated on the robot, and an overshoot stops the assist and reduces the cap. The motor power, output, freshness and other domain guards remain in force.

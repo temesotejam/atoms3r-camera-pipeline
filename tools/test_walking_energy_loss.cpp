@@ -58,10 +58,10 @@ int main(int argc,char** argv) {
   assert(adaptive.capMs()==25);
   assert(adaptive.observe(raw,raw,target,25));assert(adaptive.capMs()==25);
   assert(adaptive.observe(raw,raw,target,25));assert(adaptive.capMs()==30);
-  for(int i=0;i<10;++i)assert(adaptive.observe(raw,raw,target,adaptive.capMs()));
-  assert(adaptive.capMs()==40);
-  assert(adaptive.observe(target,target,target,40));assert(adaptive.capMs()==0);
-  assert(adaptive.observe(raw,raw,target));assert(adaptive.capMs()==35);
+  for(int i=0;i<20;++i)assert(adaptive.observe(raw,raw,target,adaptive.capMs()));
+  assert(adaptive.capMs()==60);
+  assert(adaptive.observe(target,target,target,60));assert(adaptive.capMs()==0);
+  assert(adaptive.observe(raw,raw,target));assert(adaptive.capMs()==55);
   if(argc>1) {
     float rate,rpm,battery,previous,peak;unsigned count=0;float squared=0;
     while(std::cin>>rate>>rpm>>battery>>previous>>peak) {
