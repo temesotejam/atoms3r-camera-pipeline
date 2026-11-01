@@ -8,11 +8,11 @@ class Controller {
  public:
   void reset() { *this=Controller{}; }
   float target() const {return target_;}
-  uint16_t positiveCapMs() const {
+  uint16_t __attribute__((noinline)) positiveCapMs() const {
     const float steps=std::floor((target_-4.5f)/.875f+1e-4f);
     return static_cast<uint16_t>(80+5*steps);
   }
-  void peak(int side,float angle,float rpm,bool fresh,uint32_t ms) {
+  void __attribute__((noinline)) peak(int side,float angle,float rpm,bool fresh,uint32_t ms) {
     if(!fresh || !std::isfinite(angle) || !std::isfinite(rpm) ||
        angle<0 || (side!=1 && side!=-1)) {paired_=false;good_=0;return;}
     if(!paired_) {if(good_ && (ms<=ms_ || ms-ms_>1500))good_=0;side_=side;angle_=angle;rpm_=rpm;ms_=ms;paired_=true;return;}
