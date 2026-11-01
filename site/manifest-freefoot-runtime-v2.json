@@ -1,6 +1,6 @@
 {
   "name": "AtomS3R Lateral Energy Control",
-  "version": "1.0.50-wheel-arrival",
+  "version": "1.0.51-walking-feedback",
   "builds": [
     {
       "chipFamily": "ESP32-S3",
