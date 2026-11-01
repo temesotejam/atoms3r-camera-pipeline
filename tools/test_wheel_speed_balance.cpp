@@ -17,5 +17,9 @@ int main(int argc,char**){
  c.peak(1,6);c.peak(-1,3.9f);c.crossing(-1,380,true,11000);c.crossing(1,49,true,11400);assert(c.capMs()==100);
  c.reset();c.peak(1,6);c.peak(-1,4.5f);c.crossing(-1,380,true,1000);c.crossing(1,49,true,3000);assert(c.capMs()==100);
  c.crossing(-1,380,true,4000);c.crossing(1,49,false,4400);assert(c.capMs()==100);
+ wheel_speed_balance::Controller high;high.peak(1,4.8f);high.peak(-1,3.5f);
+ for(int i=0;i<16;i++){unsigned t=1000+i*800;high.crossing(-1,630,true,t);high.crossing(1,340,true,t+400);}
+ assert(high.capMs()==60); // observed high-speed pair was formerly excluded
+ high.crossing(-1,630,true,16000);high.crossing(1,340,false,16400);assert(high.capMs()==100);
  std::cout<<"Wheel speed bias: consecutive paired evidence, bounded cap, weak swing and stale data PASS\n";
 }

@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include <string.h>
 namespace usb_diag {
-enum class Command { None, Enable, Disable, Status, Unknown };
+enum class Command { None, Enable, Disable, Status, Download, Unknown };
 class Parser {
  public:
   Command feed(char c) {
@@ -17,6 +17,7 @@ class Parser {
         !strcmp(line_, "DIAG ON") ? Command::Enable :
         !strcmp(line_, "DIAG OFF") ? Command::Disable :
         !strcmp(line_, "DIAG STATUS") ? Command::Status :
+        !strcmp(line_, "ENTER DOWNLOAD") ? Command::Download :
         length_ ? Command::Unknown : Command::None;
     length_ = 0; overflow_ = false; return result;
   }

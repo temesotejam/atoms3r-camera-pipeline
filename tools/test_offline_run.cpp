@@ -66,6 +66,7 @@ int main() {
   assert(line("DIAG ON\r\n")==usb_diag::Command::Enable);
   assert(line("DIAG OFF\n")==usb_diag::Command::Disable);
   assert(line("DIAG STATUS\n")==usb_diag::Command::Status);
+  assert(line("ENTER DOWNLOAD\n")==usb_diag::Command::Download);
   assert(line("DIAG ONxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n")==usb_diag::Command::Unknown);
   assert(line("DIAG ON\n")==usb_diag::Command::Enable);
   std::cout << "HTTP pause lifecycle: response drain, stop-before-START, no radio dependency, start rejection/timeout, early STOP, bind retry, two full runs, clock wrap; USB opt-in PASS\n";

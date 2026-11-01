@@ -15,8 +15,16 @@ class Controller {
     if(!fresh || !std::isfinite(rpm)) { reset(); return; }
     if(side<0) { negative_rpm_=rpm;negative_ms_=ms;have_negative_=true;return; }
     if(side!=1) return;
-    if(!have_negative_ || ms<=negative_ms_ || ms-negative_ms_>1500 ||
-       !std::isfinite(positive_peak_) || positive_peak_<5.f ||
+    if(!have_negative_ || ms<=negative_ms_ || ms-negative_ms_>1500) { cap_=100;biased_=0;have_negative_=false;return; }
+    // Both crossings rotating in the same direction indicates sustained
+    // momentum, including states beyond the negative-side model's domain.
+    // Reduce only the positive excitation, slowly; never invent brake torque.
+    const bool sustained=negative_rpm_>=400.f && rpm>=150.f;
+    if(sustained) {
+      if(++biased_>=2) {if(cap_>60)cap_-=5;biased_=0;}
+      have_negative_=false;return;
+    }
+    if(!std::isfinite(positive_peak_) || positive_peak_<5.f ||
        !std::isfinite(negative_peak_) || negative_peak_<4.f) { cap_=100;biased_=0;have_negative_=false;return; }
     const bool biased=negative_rpm_>=250.f && rpm>=-20.f && rpm<=150.f && negative_rpm_-rpm>=250.f;
     if(biased) { if(++biased_>=2) {if(cap_>80)cap_-=5;biased_=0;} }

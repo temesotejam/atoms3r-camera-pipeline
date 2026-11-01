@@ -61,7 +61,7 @@ header = converter.parse_header(data)
 metadata = converter.expand_tables(json.loads(data[110:110+header['metadata_json_size']], parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value))))
 assert metadata['metadata_json_final_bytes'] == header['metadata_json_size']
 assert not metadata['metadata_event_detail_truncated']
-assert metadata['firmware_revision']=='1.0.51-walking-feedback'
+assert metadata['firmware_revision']=='1.0.52-wheel-bias-usb'
 for manifest in ('site/manifest.json','site/manifest-freefoot-runtime-v2.json'):
     assert json.loads(Path(manifest).read_text())['version']==metadata['firmware_revision']
 assert metadata['energy_model']=='angle_energy_bridge'

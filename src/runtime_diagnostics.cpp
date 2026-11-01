@@ -6,6 +6,8 @@
 #include <Arduino.h>
 #include <esp_attr.h>
 #include <esp_system.h>
+#include <soc/rtc_cntl_reg.h>
+#include <soc/soc.h>
 #include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -129,11 +131,22 @@ void appendSample(const char* label, const Sample& s) {
   append("USBDBG,%s,heap_at_ms=%u,internal=%u,min=%u,largest=%u,dma=%u,psram=%u\n",
       label, m.at_ms, m.internal_free, m.internal_min, m.largest, m.dma_free, m.psram_free);
 }
+void forceDownloadOnShutdown() { REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT); }
 void tick() {
   // A bounded command listener remains available before Wi-Fi/IMU startup.
   // Merely connecting USB never enables periodic diagnostics.
   for (uint8_t i = 0; i < 32 && Serial.available() > 0; ++i) {
     const auto command = usb_commands.feed(static_cast<char>(Serial.read()));
+    if (command == usb_diag::Command::Download) {
+      if (runActive()) {
+        Serial.print("USBDBG,download=busy\n");
+      } else if (esp_register_shutdown_handler(forceDownloadOnShutdown) == ESP_OK) {
+        Serial.print("USBDBG,download=starting\n");
+        vTaskDelay(pdMS_TO_TICKS(150));
+        esp_restart();
+      } else Serial.print("USBDBG,download=failed\n");
+      continue;
+    }
     if (command == usb_diag::Command::Enable) setEnabled(true);
     else if (command == usb_diag::Command::Disable) setEnabled(false);
     if (command != usb_diag::Command::None && Serial && Serial.availableForWrite() > 128) {
