@@ -3149,6 +3149,7 @@ void ExperimentRunner::observeWheelWorkPeak(
   if (!wheelWorkMode()) return;
   if (!event.pending_command_matched || !energy_control_autonomous_pending_wheel_valid_ ||
       energy_control_autonomous_pending_wheel_age_us_>30000) {
+    if(event.physical_peak_side<0) walking_loss_feedback_.interrupt();
     adaptive_cg_.breakPair();return;
   }
   float raw=NAN;
@@ -3160,6 +3161,7 @@ void ExperimentRunner::observeWheelWorkPeak(
     adaptive_cg_.breakPair();
     return; // Separate measured walking branch: no historical bias/CG learning.
   }
+  if(event.physical_peak_side<0) walking_loss_feedback_.interrupt();
   if(event.target_peak_deg==12.f && (work_positive_pending_ || work_negative_pending_)) {
     const float raw_mj=work_positive_pending_ ? work_positive_pending_raw_j_*1000.f :
         (energy_control_autonomous_pending_model_energy_j_-work_negative_pending_bias_j_)*1000.f;

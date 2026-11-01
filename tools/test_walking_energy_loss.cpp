@@ -60,25 +60,37 @@ int main(int argc,char** argv) {
   assert(adaptive.capMs()==25);
   assert(adaptive.observe(raw,raw,target,25));assert(adaptive.capMs()==25);
   assert(adaptive.observe(raw,raw,target,25));assert(adaptive.capMs()==30);
-  for(int i=0;i<20;++i)assert(adaptive.observe(raw,raw,target,adaptive.capMs()));
+  for(int i=0;i<50;++i)assert(adaptive.observe(raw,raw,target,adaptive.capMs()));
   assert(adaptive.capMs()==60);
   assert(adaptive.observe(target,target,target,60));assert(adaptive.capMs()==0);
   assert(adaptive.observe(raw,raw,target));assert(adaptive.capMs()==55);
   // Extension requires fresh, positive arrival speed and three matched
   // capped arrivals. Missing or low speed returns the cap to 60 ms.
   Feedback speed;assert(speed.observe(raw,raw,target));assert(speed.observe(raw,raw,target));
-  for(int i=0;i<14;++i)assert(speed.observe(raw,raw,target,speed.capMs()));
+  for(int i=0;i<60 && speed.capMs()<60;++i)assert(speed.observe(raw,raw,target,speed.capMs()));
+  for(int i=0;i<3;++i)assert(speed.observe(raw,raw,target,60,40.f,true));
   assert(speed.capMs()==60);
   assert(speed.observe(raw,raw,target,60,40.f,true));
   assert(!speed.observe(NAN,raw,target,60,40.f,true));
-  assert(speed.observe(raw,raw,target,60,40.f,true));
-  assert(speed.observe(raw,raw,target,60,40.f,true));assert(speed.capMs()==60);
-  assert(speed.observe(raw,raw,target,60,40.f,true));assert(speed.capMs()==65);
+  for(int i=0;i<10 && speed.capMs()==60;++i)assert(speed.observe(raw,raw,target,60,40.f,true));
+  assert(speed.capMs()==65);
   assert(speed.observe(raw,raw,target,65,NAN,false));assert(speed.capMs()==60);
-  for(int i=0;i<9;++i)assert(speed.observe(raw,raw,target,speed.capMs(),40.f,true));
+  for(int i=0;i<60 && speed.capMs()<75;++i)assert(speed.observe(raw,raw,target,speed.capMs(),40.f,true));
   assert(speed.capMs()==75);
   assert(speed.observe(raw,raw,target,75,29.f,true));assert(speed.capMs()==60);
   assert(speed.observe(target,target,target,60,40.f,true));assert(speed.capMs()==0);
+  // A real reduction of arrival energy after increasing width rolls back and
+  // locks the exploration ceiling for this run, even if target is missed.
+  Feedback worse;assert(worse.observe(raw,raw,target));assert(worse.observe(raw,raw,target));
+  for(int i=0;i<50 && worse.capMs()<50;++i)assert(worse.observe(raw,raw,target,worse.capMs(),100,true));
+  assert(worse.capMs()==50);
+  for(int i=0;i<3;++i)assert(worse.observe(raw-.05f,raw,target,50,100,true));
+  assert(worse.capMs()==45);
+  for(int i=0;i<12;++i)assert(worse.observe(raw,raw,target,45,100,true));
+  assert(worse.capMs()==45);
+  Feedback interrupted;assert(interrupted.observe(raw,raw,target));assert(interrupted.observe(raw,raw,target));
+  for(int i=0;i<50 && interrupted.capMs()<50;++i)assert(interrupted.observe(raw,raw,target,interrupted.capMs(),100,true));
+  interrupted.interrupt();assert(interrupted.capMs()==45);
   if(argc>1) {
     float rate,rpm,battery,previous,peak;unsigned count=0;float squared=0;
     while(std::cin>>rate>>rpm>>battery>>previous>>peak) {

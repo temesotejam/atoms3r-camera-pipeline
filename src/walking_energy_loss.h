@@ -30,23 +30,48 @@ class Feedback {
   // Raise the cap only after two completed
   // matching powered arrivals below target at the current cap.
   uint16_t capMs() const { return count_>=2 && !overshot_ ? cap_ms_ : 0; }
+  void interrupt() {
+    if(trial_active_) cap_ms_=trial_previous_cap_;
+    trial_active_=false;trial_count_=0;trial_sum_=0;
+    baseline_count_=0;baseline_sum_=0;limited_count_=0;extended_count_=0;
+  }
   bool observe(float actual_mj,float raw_mj,float target_mj,uint16_t width_ms=0,
                float arrival_rpm=NAN,bool arrival_rpm_fresh=false) {
     if(!std::isfinite(actual_mj)||!std::isfinite(raw_mj)||
-       !std::isfinite(target_mj)||actual_mj<0.f||raw_mj<0.f||target_mj<=0.f) {limited_count_=0;extended_count_=0;return false;}
+       !std::isfinite(target_mj)||actual_mj<0.f||raw_mj<0.f||target_mj<=0.f) {interrupt();return false;}
     overshot_=actual_mj>=target_mj;
-    if(overshot_) { cap_ms_=cap_ms_>25 ? cap_ms_-5 : 25; limited_count_=0;extended_count_=0; }
+    if(overshot_) { cap_ms_=cap_ms_>25 ? cap_ms_-5 : 25; limited_count_=0;extended_count_=0;trial_active_=false;trial_count_=0;trial_sum_=0;baseline_count_=0;baseline_sum_=0; }
     if(cap_ms_>60 && (!arrival_rpm_fresh || !std::isfinite(arrival_rpm) || arrival_rpm<30.f)) {
-      cap_ms_=60;extended_count_=0;
+      cap_ms_=60;extended_count_=0;trial_active_=false;trial_count_=0;trial_sum_=0;baseline_count_=0;baseline_sum_=0;
     }
-    if(std::fabs(actual_mj-raw_mj)>.15f) { limited_count_=0;extended_count_=0;return false; }
+    if(std::fabs(actual_mj-raw_mj)>.15f) { interrupt();return false; }
+    if(trial_active_ && width_ms<cap_ms_) interrupt();
+    // Do not continue increasing pulse width solely because the target is
+    // missed. Compare matched, capped arrivals before and after each increase.
+    // This is a conservative online guard, not an identified causal model.
+    if(trial_active_ && width_ms>=cap_ms_) {
+      trial_sum_+=actual_mj;
+      if(++trial_count_>=3) {
+        if(trial_sum_/trial_count_ < trial_baseline_-.03f) {
+          cap_ms_=trial_previous_cap_;
+          ceiling_ms_=trial_previous_cap_;
+          limited_count_=extended_count_=0;
+        }
+        trial_active_=false;trial_count_=0;trial_sum_=0;
+      }
+    }
     if(width_ms>0 && width_ms>=cap_ms_ && actual_mj<target_mj-.03f) {
+      if(!trial_active_) { baseline_sum_+=actual_mj; ++baseline_count_; }
       if(cap_ms_<60) {
-        if(++limited_count_>=2) { cap_ms_+=5;limited_count_=0; }
+        if(++limited_count_>=2 && !trial_active_) {
+          if(cap_ms_>=45 && cap_ms_<ceiling_ms_ && baseline_count_>=2) startTrial();
+          else if(cap_ms_<45 && cap_ms_<ceiling_ms_) {cap_ms_+=5;baseline_count_=0;baseline_sum_=0;}
+          limited_count_=0;
+        }
       } else if(arrival_rpm_fresh && std::isfinite(arrival_rpm) && arrival_rpm>=30.f) {
         // Experimental 65–75 ms: three matched, capped, below-target
         // arrivals with a fresh same-direction wheel speed still positive.
-        if(++extended_count_>=3) {if(cap_ms_<75)cap_ms_+=5;extended_count_=0;}
+        if(++extended_count_>=3 && !trial_active_) {if(cap_ms_<75 && cap_ms_<ceiling_ms_ && baseline_count_>=2)startTrial();extended_count_=0;}
       } else extended_count_=0;
     } else if(width_ms>0) {limited_count_=0;extended_count_=0;}
     residual_[next_]=actual_mj-raw_mj;next_=(next_+1)%3;
@@ -54,7 +79,16 @@ class Feedback {
     return true;
   }
  private:
+  void startTrial() {
+    trial_baseline_=baseline_sum_/baseline_count_;trial_previous_cap_=cap_ms_;
+    cap_ms_+=5;trial_active_=true;trial_count_=0;trial_sum_=0;
+    baseline_sum_=0;baseline_count_=0;
+  }
   float residual_[3]={};unsigned count_=0,next_=0,limited_count_=0,extended_count_=0;
+  float baseline_sum_=0,trial_sum_=0,trial_baseline_=0;
+  unsigned baseline_count_=0,trial_count_=0;
+  uint16_t ceiling_ms_=75,trial_previous_cap_=0;
+  bool trial_active_=false;
   uint16_t cap_ms_=25;bool overshot_=false;
 };
 __attribute__((noinline)) inline wheel_work_energy_control::Choice choose(
