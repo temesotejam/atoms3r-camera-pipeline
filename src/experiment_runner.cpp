@@ -20,6 +20,7 @@
 #include "positive_current_batch.h"
 #include "one_peak_energy_inverse.h"
 #include "wheel_work_energy_control.h"
+#include "peak_mpc.h"
 
 namespace {
 // Called only for an accepted ZERO cross. Keep diagnostic field assembly out
@@ -3231,7 +3232,7 @@ void ExperimentRunner::captureWheelWorkDecision(
 wheel_work_energy_control::Choice ExperimentRunner::chooseWheelWork(
     const PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
     float fast_v, bool* state_supported, int16_t* selected_current_ma,
-    const lateral_energy::CurrentTable** selected_current_table) const {
+    const lateral_energy::CurrentTable** selected_current_table,uint16_t positive_or_walking_cap_ms) const {
   wheel_work_energy_control::Choice choice;
   const int8_t side=event.physical_next_peak_side;
   const float target_mj=event.target_energy_j*1000.f;
@@ -3248,7 +3249,7 @@ wheel_work_energy_control::Choice ExperimentRunner::chooseWheelWork(
   if(side<0 && walking_energy_loss::supported(state)) {
     return walking_energy_loss::choose(lateral_energy_geometry_,state,lateral_current_table_,
         static_cast<float>(side)*event.i0_estimated_mA,predictCurrentGoalMa(300,fast_v),
-        target_mj,walking_loss_feedback_,run_cg_shift_mm_);
+        target_mj,walking_loss_feedback_,run_cg_shift_mm_,positive_or_walking_cap_ms);
   }
   if ((side<0 && wheel_work_energy_control::negativeBoundaryWeight(state)<=0.f) ||
       !std::isfinite(target_mj) || target_mj<=0.f) return choice;
@@ -3276,7 +3277,7 @@ wheel_work_energy_control::Choice ExperimentRunner::chooseWheelWork(
         predictCurrentGoalMa(400,fast_v)};
     choice=wheel_work_energy_control::choosePositive(lateral_energy_geometry_,state,
         initial_current_ma,tables,goals,target_mj,positive_bias_mj,bridge_bias_mj,coast_only,
-        state.target_deg==8.f ? wheel_speed_balance_.capMs() : 100);
+        state.target_deg==8.f ? (wheel_speed_balance_.capMs()<positive_or_walking_cap_ms ? wheel_speed_balance_.capMs() : positive_or_walking_cap_ms) : 100);
   } else {
     if(state.target_deg==8.f && state.previous_peak_deg<work_target_policy::reserveFloor(state.target_deg)) return choice;
     const uint16_t cap=work_negative_feedback_.balancedCapMs(lateral_energy_geometry_,state.previous_peak_deg,run_cg_shift_mm_,event.target_peak_deg);
@@ -3475,6 +3476,30 @@ void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(uint32_t t_test_
   if (work_mode)
     work_choice=chooseWheelWork(event,fast_v,&event.rate_support_diagnostic,
         &selected_current_mA,&selected_current_table);
+  if (work_mode && event.target_peak_deg==8.f && work_choice.valid &&
+      work_choice.command_sign==1 && work_choice.width_ms>=30 &&
+      ((event.physical_next_peak_side>0 && work_choice.current_ma==400) ||
+       (event.physical_next_peak_side<0 && work_choice.branch==10))) {
+    bool alternate_supported=false;
+    int16_t alternate_current=selected_current_mA;
+    const lateral_energy::CurrentTable* alternate_table=selected_current_table;
+    const auto alternative=chooseWheelWork(event,fast_v,&alternate_supported,
+        &alternate_current,&alternate_table,work_choice.width_ms-5);
+    if(alternative.valid && alternative.command_sign==work_choice.command_sign &&
+       alternative.current_ma==work_choice.current_ma) {
+      const peak_mpc::State state{event.zero_cross_abs_rate_dps,event.pre_input_wheel_speed_rpm,
+          event.previous_peak_amplitude_deg,static_cast<float>(event.vbat_mV),event.physical_next_peak_side};
+      if(peak_error_adaptation::speedUsable(event.pre_input_wheel_speed_rpm,event.pre_input_wheel_speed_valid,event.pre_input_wheel_speed_age_us)) {
+        const float next_target=8.f+(event.physical_next_peak_side>0 ? foot_balance_.negativeOffsetDeg() : foot_balance_.positiveOffsetDeg());
+        const auto result=peak_mpc::choose(state,work_choice.width_ms,alternative.width_ms,event.foot_balance_target_deg,next_target);
+        if(result.valid) {
+          event.mpc_valid=true;event.mpc_alternate=result.alternate;
+          event.mpc_second_peak_deg=result.second_peak;event.mpc_speed_proxy_rpm=result.mean_rpm;
+          if(result.alternate) {work_choice=alternative;selected_current_mA=alternate_current;selected_current_table=alternate_table;}
+        }
+      }
+    }
+  }
   if (work_mode) captureWheelWorkDecision(event,work_choice);
 
   const float goal_current_mA = predictCurrentGoalMa(selected_current_mA,fast_v);

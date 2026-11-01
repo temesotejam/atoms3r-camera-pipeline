@@ -372,7 +372,7 @@ private:
   wheel_work_energy_control::Choice __attribute__((noinline)) chooseWheelWork(
       const PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
       float fast_v, bool* state_supported, int16_t* selected_current_ma,
-      const lateral_energy::CurrentTable** selected_current_table) const;
+      const lateral_energy::CurrentTable** selected_current_table,uint16_t positive_or_walking_cap_ms=100) const;
   void __attribute__((noinline)) selectPositiveCurrentBatch(
       PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
       int16_t& selected_current_mA,

@@ -384,6 +384,8 @@ class PsramLogger {
     uint16_t work_brake_cap_ms=0;
     uint8_t work_bias_samples=0;
     float work_model_weight=NAN;
+    bool mpc_valid=false,mpc_alternate=false;
+    float mpc_second_peak_deg=NAN,mpc_speed_proxy_rpm=NAN;
     bool fixed_negative_probe=false;
     uint16_t negative_probe_batch_index = UINT16_MAX;
     uint16_t negative_probe_batch_planned_width_ms = 0;

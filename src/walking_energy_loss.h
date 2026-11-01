@@ -94,7 +94,7 @@ class Feedback {
 __attribute__((noinline)) inline wheel_work_energy_control::Choice choose(
     const lateral_energy::Geometry& g,const wheel_work_energy_control::State& s,
     const lateral_energy::CurrentTable& table,float initial_ma,float goal_ma,
-    float target_mj,const Feedback& feedback,float cg_mm) {
+    float target_mj,const Feedback& feedback,float cg_mm,uint16_t requested_cap_ms=100) {
   using namespace wheel_work_energy_control;
   Choice c;
   if(!supported(s)||!std::isfinite(target_mj)||target_mj<=0.f||
@@ -105,7 +105,8 @@ __attribute__((noinline)) inline wheel_work_energy_control::Choice choose(
   // Signed Uprev-Ecoast may be negative from motion or energy exchange.
   const float loss=previous_mj-passive;
   if(!std::isfinite(loss)||passive<=0.f)return c;
-  for(uint16_t ms=0;ms<=feedback.capMs();ms=ms==0 ? 10 : ms+1) {
+  const uint16_t cap=feedback.capMs()<requested_cap_ms ? feedback.capMs() : requested_cap_ms;
+  for(uint16_t ms=0;ms<=cap;ms=ms==0 ? 10 : ms+1) {
     const float q=ms ? lateral_energy::charge(table,ms,initial_ma,goal_ma) : 0.f;
     if(!std::isfinite(q)||q<0.f||q>25.f)continue;
     Prediction p;
@@ -118,7 +119,7 @@ __attribute__((noinline)) inline wheel_work_energy_control::Choice choose(
     p.applied_bias_mj=feedback.biasMj();
     consider(c,300,ms,q,p,target_mj);
   }
-  c.command_sign=1;c.allowed_cap_ms=feedback.capMs();c.walking_loss_mj=loss;
+  c.command_sign=1;c.allowed_cap_ms=cap;c.walking_loss_mj=loss;
   finish(c,target_mj);return c;
 }
 }
