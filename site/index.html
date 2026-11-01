@@ -17,6 +17,10 @@
       <div class="badges"><span>ESP32-S3</span><span>BMI270 400/200 Hz</span><span>RWLOG v56</span><span>MEKF</span><span>左右足角度</span></div>
     </header>
     <section class="panel important">
+      <h2>1.0.48：ホイール回転の偏りを抑える</h2>
+      <p>目標8度の歩行で、前入力時のホイール回転数が片方向に偏る状態が続けば、プラス側の入力上限を少しずつ調整します。旋回や歩行への効果は実機で未検証です。測定後のログで左右の足・揺動・回転数を確認します。</p>
+    </section>
+    <section class="panel important">
       <h2>1.0.47：足の動きと低回転時の補償を改善</h2>
       <p>バージョン <strong>1.0.47-walking-balance</strong>。歩行時の足マーカーの差に応じた目標調整を使い、最新ログの低回転時の無入力データから負側の適用範囲を広げます。目標不足が続く場合、完了ピークを確認しながら負側入力の上限を25 msから最大60 msへ段階的に広げます。25 msを超える歩行時入力の効果は実機で未検証です。</p>
     </section>

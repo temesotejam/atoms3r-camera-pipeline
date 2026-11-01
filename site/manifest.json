@@ -1,6 +1,6 @@
 {
   "name": "AtomS3R Lateral Energy Control",
-  "version": "1.0.47-walking-balance",
+  "version": "1.0.48-wheel-balance",
   "builds": [
     {
       "chipFamily": "ESP32-S3",

@@ -2529,7 +2529,7 @@ void ExperimentRunner::resetEnergyControlAutonomous() {
   work_negative_feedback_ = wheel_work_energy_control::NegativeFeedback{};
   walking_loss_feedback_=walking_energy_loss::Feedback{};
   work_walking_pending_=false;
-  foot_balance_.reset(status_.run_id);foot_frame_run_id_=0;
+  foot_balance_.reset(status_.run_id);wheel_speed_balance_.reset();foot_frame_run_id_=0;
   foot_frame_left_valid_=foot_frame_right_valid_=false;pending_target_energy_j_=NAN;
   for (auto& feedback : work_positive_feedback_) feedback=wheel_work_energy_control::SideEnergyFeedback{};
   work_negative_assist_feedback_=wheel_work_energy_control::NegativeAssistFeedback{};
@@ -2868,6 +2868,7 @@ bool ExperimentRunner::recordEnergyControlAutonomousPeak(uint32_t peak_ms, int8_
   event.peak_time_ms = peak_ms;
   event.physical_peak_side = physical_side;
   event.peak_amplitude_deg = amplitude_deg;
+  if(wheelWorkMode() && energy_control_autonomous_target_peak_deg_==8.f) wheel_speed_balance_.peak(physical_side,amplitude_deg);
   event.detector_peak_angle_deg = detector_peak_angle_deg;
   event.target_peak_deg = energy_control_autonomous_pending_peak_ &&
       physical_side == energy_control_autonomous_pending_next_side_ && isfinite(energy_control_autonomous_pending_target_deg_)
@@ -3210,8 +3211,10 @@ void ExperimentRunner::captureWheelWorkDecision(
     event.work_brake_cap_ms=choice.allowed_cap_ms;
     event.work_bias_samples=static_cast<uint8_t>(work_positive_feedback_[work_target_policy::negativeFeedbackIndex(event.target_peak_deg,choice.branch==9)].count());
   }
-  if (event.physical_next_peak_side>0)
+  if (event.physical_next_peak_side>0) {
+    event.work_brake_cap_ms=choice.allowed_cap_ms; // Positive excitation cap in 8-degree mode.
     event.work_bias_samples=static_cast<uint8_t>(work_positive_feedback_[choice.branch==6 ? 1 : 0].count());
+  }
   if(event.target_peak_deg==12.f)
     event.work_bias_samples=static_cast<uint8_t>(work_target12_controller_.count(event.physical_next_peak_side));
   if(choice.branch==10)
@@ -3269,7 +3272,8 @@ wheel_work_energy_control::Choice ExperimentRunner::chooseWheelWork(
     const float goals[]={predictCurrentGoalMa(300,fast_v),predictCurrentGoalMa(350,fast_v),
         predictCurrentGoalMa(400,fast_v)};
     choice=wheel_work_energy_control::choosePositive(lateral_energy_geometry_,state,
-        initial_current_ma,tables,goals,target_mj,positive_bias_mj,bridge_bias_mj,coast_only);
+        initial_current_ma,tables,goals,target_mj,positive_bias_mj,bridge_bias_mj,coast_only,
+        state.target_deg==8.f ? wheel_speed_balance_.capMs() : 100);
   } else {
     if(state.target_deg==8.f && state.previous_peak_deg<work_target_policy::reserveFloor(state.target_deg)) return choice;
     const uint16_t cap=work_negative_feedback_.balancedCapMs(lateral_energy_geometry_,state.previous_peak_deg,run_cg_shift_mm_,event.target_peak_deg);
@@ -3461,6 +3465,9 @@ void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(uint32_t t_test_
   // Search the measured command envelope; a target outside that envelope is
   // reported as saturated, never extrapolated to a longer brake pulse.
   const bool work_mode = wheelWorkMode();
+  if(work_mode && event.target_peak_deg==8.f)
+    wheel_speed_balance_.crossing(event.physical_next_peak_side,event.pre_input_wheel_speed_rpm,
+        peak_error_adaptation::speedUsable(event.pre_input_wheel_speed_rpm,event.pre_input_wheel_speed_valid,event.pre_input_wheel_speed_age_us),t_test_ms);
   wheel_work_energy_control::Choice work_choice;
   if (work_mode)
     work_choice=chooseWheelWork(event,fast_v,&event.rate_support_diagnostic,

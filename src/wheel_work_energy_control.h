@@ -335,13 +335,13 @@ inline void finish(Choice& c, float target_mj) {
 
 inline Choice choosePositive(const lateral_energy::Geometry& geometry,const State& state,
     float initial_current_ma,const lateral_energy::CurrentTable* const tables[3],
-    const float goals[3],float target_mj,float bias_mj,float bridge_bias_mj=NAN,bool coast_only=false) {
+    const float goals[3],float target_mj,float bias_mj,float bridge_bias_mj=NAN,bool coast_only=false,uint16_t max_width_ms=100) {
   Choice choice;
   if (!std::isfinite(target_mj) || target_mj<=0.f) return choice;
   if (!std::isfinite(bridge_bias_mj)) bridge_bias_mj=bias_mj;
   const int16_t currents[]={300,350,400};
   for (uint8_t i=0;i<3;++i) {
-    for (uint16_t width=0;width<=100;width=(width==0 ? 10 : width+1)) {
+    for (uint16_t width=0;width<=(max_width_ms<100 ? max_width_ms : 100);width=(width==0 ? 10 : width+1)) {
       if(coast_only && width>0) break;
       const float q=lateral_energy::charge(*tables[i],width,initial_current_ma,goals[i]);
       const Prediction p=positiveBoundary(geometry,state,q,bias_mj,bridge_bias_mj);
@@ -349,6 +349,7 @@ inline Choice choosePositive(const lateral_energy::Geometry& geometry,const Stat
     }
     if (choice.valid && std::fabs(choice.energy_mj-target_mj)<=.005f) break;
   }
+  choice.allowed_cap_ms=(max_width_ms<100 ? max_width_ms : 100);
   finish(choice,target_mj);
   return choice;
 }

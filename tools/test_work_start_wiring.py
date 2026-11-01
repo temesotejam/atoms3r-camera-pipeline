@@ -22,7 +22,7 @@ assert 'work_target12_controller_.observe(' in runner
 assert 'work_pending_calibration_weight_>=.9f' in runner
 assert 'work_choice.branch==9' in runner
 assert 'positiveBiasMj(run_cg_shift_mm_' in runner
-assert 'positive_bias_mj,bridge_bias_mj,coast_only)' in runner
+assert 'positive_bias_mj,bridge_bias_mj,coast_only,' in runner
 assert runner.count('work_target_policy::negativeFeedbackIndex(')==3
 worker=Path('src/run_control_worker.h').read_text(encoding='utf-8')
 assert 'work_target_policy::packageAllowed(target_deg, brake_max_ms, input_current_mA,' in worker

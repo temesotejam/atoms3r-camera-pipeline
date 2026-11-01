@@ -2,6 +2,10 @@
 set -euo pipefail
 python3 tools/embed_runtime_web.py --check
 
+g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_wheel_speed_balance.cpp -o /tmp/test_wheel_speed_balance
+python3 tools/test_wheel_speed_evidence.py /tmp/test_wheel_speed_balance
+/tmp/test_wheel_speed_balance
+
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_balance_adaptive.cpp -o /tmp/test_foot_balance_adaptive
 /tmp/test_foot_balance_adaptive
 

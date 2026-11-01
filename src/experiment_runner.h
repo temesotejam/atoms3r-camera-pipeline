@@ -12,6 +12,7 @@
 #include "lateral_energy_control.h"
 #include "wheel_work_energy_control.h"
 #include "walking_energy_loss.h"
+#include "wheel_speed_balance.h"
 #include "foot_balance_adaptive.h"
 #include "target12_state_work.h"
 #include "peak_error_adaptation.h"
@@ -146,6 +147,7 @@ public:
 
 private:
   foot_balance_adaptive::Controller foot_balance_;
+  wheel_speed_balance::Controller wheel_speed_balance_;
   uint16_t foot_frame_run_id_=0;
   uint32_t foot_frame_ms_=0;
   float foot_frame_left_=NAN,foot_frame_right_=NAN;
