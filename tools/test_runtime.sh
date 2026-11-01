@@ -56,6 +56,8 @@ python3 tools/test_position_observation.py
 node --check web/pose_comparison.js
 node tools/test_pose_comparison.js
 node --check site/serial-monitor.js
+node --check site/flasher-completion.js
+node tools/test_flasher_completion.js
 node tools/test_serial_monitor.js
 node tools/test_runtime_web.js
 node tools/test_offline_web.js
