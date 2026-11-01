@@ -3333,14 +3333,21 @@ void ExperimentRunner::choosePeakMpc(PsramLogger::EnergyControlAutonomousZeroCro
 }
 
 void ExperimentRunner::applyFootEnergyTarget(PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,uint32_t t_ms) {
-  foot_energy_.update(t_ms);
+  foot_energy_.update(t_ms,gradual_start_.target());
   const int side=event.physical_next_peak_side;
   const float base=controlPotential(side*gradual_start_.target());
   event.target_energy_j=base*foot_energy_.factor(side);
   event.foot_balance_target_deg=controlAngle(event.target_energy_j,side);
   event.foot_energy_bias=foot_energy_.bias();
   event.foot_energy_left_px=foot_energy_.leftMean();event.foot_energy_right_px=foot_energy_.rightMean();
-  event.foot_energy_valid=foot_energy_.valid();
+  event.foot_energy_valid=foot_energy_.valid();event.foot_energy_phase=foot_energy_.phase();event.foot_energy_reason=foot_energy_.reason();
+}
+
+void ExperimentRunner::observeFootEnergyDecision(PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,uint32_t t_ms,bool supported,float charge) {
+  if(!wheelWorkMode() || event.target_peak_deg!=8.f)return;
+  foot_energy_.decision(t_ms,event.physical_next_peak_side,supported,charge,event.pre_input_wheel_speed_rpm,event.vbat_mV);
+  // Record the state after the decision as well, including immediate aborts.
+  event.foot_energy_phase=foot_energy_.phase();event.foot_energy_reason=foot_energy_.reason();
 }
 
 void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(uint32_t t_test_ms, float rate_dps,
@@ -3629,6 +3636,7 @@ void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(uint32_t t_test_
   }
   if (!decision.valid || !std::isfinite(event.free_next_peak_amplitude_deg)) {
     audit.stage=1;audit.solver_end_us=micros();
+    observeFootEnergyDecision(event,t_test_ms,false,0.f);
     event.reason=work_mode && event.physical_next_peak_side<0 && !work_choice.valid
         ? (event.rate_support_diagnostic
             ? Config::ENERGY_CONTROL_AUTONOMOUS_REASON_WORK_PROTECT_OPPOSITE
@@ -3743,6 +3751,7 @@ void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(uint32_t t_test_
   energy_control_autonomous_pending_saturated_upper_ = event.q_saturated_upper;
   energy_control_autonomous_pending_saturated_lower_ = event.q_saturated_lower;
   if (selected_width_ms == 0) {
+    observeFootEnergyDecision(event,t_test_ms,false,0.f);
     event.valid = true;
     event.reason = Config::ENERGY_CONTROL_AUTONOMOUS_REASON_VALID_NO_OUTPUT;
     logger_->addEnergyControlAutonomousZeroCrossEvent(event);
@@ -3750,6 +3759,7 @@ void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(uint32_t t_test_
     return;
   }
   if (status_.emergency_stop || status_.state != ExperimentState::RUNNING_BATCH_SWEEP) {
+    observeFootEnergyDecision(event,t_test_ms,false,0.f);
     if (inverse_negative || work_negative_pending_ || work_positive_pending_) {
       energy_control_autonomous_pending_peak_ = false;
       work_negative_pending_ = false;
@@ -3761,6 +3771,7 @@ void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(uint32_t t_test_
     return;
   }
   if (!roller_ || !roller_->ok()) {
+    observeFootEnergyDecision(event,t_test_ms,false,0.f);
     if (inverse_negative || work_negative_pending_ || work_positive_pending_) {
       energy_control_autonomous_pending_peak_ = false;
       work_negative_pending_ = false;
@@ -3781,6 +3792,7 @@ void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(uint32_t t_test_
   status_.current_audit_q_pred_mA_s = event.q_effective_pred_mA_s;
   if (!beginEnergyControlAutonomousPulse(now_ms, t_test_ms, event.q_command_direction,
                                          selected_width_ms, selected_current_mA)) {
+    observeFootEnergyDecision(event,t_test_ms,false,0.f);
     if (inverse_negative || work_negative_pending_ || work_positive_pending_) {
       energy_control_autonomous_pending_peak_ = false;
       work_negative_pending_ = false;
@@ -3799,6 +3811,12 @@ void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(uint32_t t_test_
   // computation consumed Core1 time without affecting the already-issued command.
   event.output_executed = true;
   event.valid = true;
+  if(work_mode && event.target_peak_deg==8.f) {
+    const bool supported=work_choice.valid && event.command_matches_zero_cross_motion && !event.q_saturated_upper && !event.q_saturated_lower &&
+      !event.energy_model_extrapolated && peak_error_adaptation::speedUsable(event.pre_input_wheel_speed_rpm,
+        event.pre_input_wheel_speed_valid,event.pre_input_wheel_speed_age_us);
+    observeFootEnergyDecision(event,t_test_ms,supported,selected_q_mA_s);
+  }
   event.reason = Config::ENERGY_CONTROL_AUTONOMOUS_REASON_NONE;
   logger_->addEnergyControlAutonomousZeroCrossEvent(event);
 }

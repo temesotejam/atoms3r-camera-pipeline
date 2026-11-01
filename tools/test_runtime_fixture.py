@@ -61,7 +61,7 @@ header = converter.parse_header(data)
 metadata = converter.expand_tables(json.loads(data[110:110+header['metadata_json_size']], parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value))))
 assert metadata['metadata_json_final_bytes'] == header['metadata_json_size']
 assert not metadata['metadata_event_detail_truncated']
-assert metadata['firmware_revision']=='1.0.55-foot-energy'
+assert metadata['firmware_revision']=='1.0.56-foot-phase-guard'
 for manifest in ('site/manifest.json','site/manifest-freefoot-runtime-v2.json'):
     cfg=json.loads(Path(manifest).read_text())
     assert cfg['version']==metadata['firmware_revision']
@@ -296,7 +296,7 @@ for work_first, suffix in ((False, '.fallback-first.rwlog'), (True, '.work-first
             assert abs(event['foot_balance_right_mean']-.2)<.00001
             assert abs(event['foot_energy_bias']-.08)<.00001
             assert event['foot_energy_left_px']==20 and event['foot_energy_right_px']==2
-            assert event['foot_energy_valid'] is True
+            assert event['foot_energy_valid'] is True and event['foot_energy_phase']==3 and event['foot_energy_reason']==4
             assert abs(event['target_energy_j']-.00076)<.000001
             assert work_metadata['walking_energy_loss']['independent_validation'] is False
         else:

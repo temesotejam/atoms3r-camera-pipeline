@@ -381,6 +381,7 @@ private:
       float fast_v,wheel_work_energy_control::Choice& choice,int16_t& current,
       const lateral_energy::CurrentTable*& table) const;
   void __attribute__((noinline)) applyFootEnergyTarget(PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,uint32_t t_ms);
+  void __attribute__((noinline)) observeFootEnergyDecision(PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,uint32_t t_ms,bool supported,float charge);
   void __attribute__((noinline)) selectPositiveCurrentBatch(
       PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
       int16_t& selected_current_mA,

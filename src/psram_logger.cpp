@@ -1670,6 +1670,8 @@ bool PsramLogger::buildMetadataJson(PsramString& json) const {
     appendAutonomousNullable("foot_energy_left_px",e.foot_energy_left_px,4);
     appendAutonomousNullable("foot_energy_right_px",e.foot_energy_right_px,4);
     detail += ",\"foot_energy_valid\":" + String(e.foot_energy_valid ? "true" : "false");
+    detail += ",\"foot_energy_phase\":" + String(e.foot_energy_phase);
+    detail += ",\"foot_energy_reason\":" + String(e.foot_energy_reason);
     appendAutonomousNullable("cg_shift_mm", e.cg_shift_mm, 6);
     appendAutonomousNullable("target_energy_j", e.target_energy_j, 8);
     appendAutonomousNullable("delta_energy_required_j", e.delta_energy_required_j, 8);
