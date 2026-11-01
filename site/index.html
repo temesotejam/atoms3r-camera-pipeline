@@ -17,6 +17,11 @@
       <div class="badges"><span>ESP32-S3</span><span>BMI270 400/200 Hz</span><span>RWLOG v56</span><span>MEKF</span><span>左右足角度</span></div>
     </header>
     <section class="panel important">
+      <h2>1.0.59：足の位相に合わせた左右差の観測と試験制御</h2>
+      <p>目標8°で、揺動ピークに対応する左右の足マーカーの動きを比較し、条件が揃うと正側の入力時間を5 msずつ調整します。入力が揃わない場合や足マーカーが校正範囲外の場合は、この調整を行いません。</p>
+      <p>過去のログでは、足マーカーが校正範囲から外れることが多く、この調整が発動しない可能性があります。左右差や直進への効果は実機で未確認です。<a href="https://github.com/temesotejam/atoms3r-lateral-energy-control/blob/main/docs/FOOT_PHASE_CONTROL_059.md">制御の内容と確認状況</a></p>
+    </section>
+    <section class="panel important">
       <h2>1.0.54：ゆっくり揺動を育てる2ピーク予測制御</h2>
       <p>目標8度では4.5度から開始し、左右のピークとホイール回転を確認して段階的に目標を上げます。開始直後は正側の入力時間も制限します。実機での効果は未確認です。</p>
       <p>目標8度の歩行で、次とその次のピーク角とホイール回転を予測します。従来の入力と、最大5 ms短い候補を比較します。測定範囲外では従来の制御を使います。予測モデルは過去の歩行記録に基づく試験版で、実機での効果は未確認です。</p>
