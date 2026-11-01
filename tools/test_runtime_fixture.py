@@ -67,9 +67,6 @@ for manifest in ('site/manifest.json','site/manifest-freefoot-runtime-v2.json'):
     assert cfg['version']==metadata['firmware_revision']
     assert cfg['new_install_improv_wait_time']==0
 assert metadata['energy_model']=='angle_energy_bridge'
-assert metadata['peak_mpc']['active'] is False
-assert metadata['low_peak_energy_feedback']['active_for_output'] is False
-assert metadata['foot_phase_cap']['hardware_validated'] is False
 assert metadata['energy_control_autonomous_revision']=='lateral_energy_angle_bridge_v8_20261015'
 assert metadata['energy_control_autonomous_negative_side_brake_width_max_ms']==0
 assert metadata['energy_control_autonomous_integral_Ki_J_per_J'] is None
@@ -258,6 +255,9 @@ for work_first, suffix in ((False, '.fallback-first.rwlog'), (True, '.work-first
         work_data[110:110 + work_header['metadata_json_size']],
         parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value))))
     assert work_metadata['energy_model'] == 'wheel_work_one_peak_control'
+    assert work_metadata['peak_mpc']['active'] is False
+    assert work_metadata['low_peak_energy_feedback']['active_for_output'] is False
+    assert work_metadata['foot_phase_cap']['hardware_validated'] is False
     assert work_metadata['control_angle_origin_abs_deg'] == 0
     assert work_metadata['work_absolute_reference_enabled'] is True
     assert work_metadata['autonomous_duration_ms'] == 30000
