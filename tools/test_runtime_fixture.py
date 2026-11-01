@@ -63,7 +63,9 @@ assert metadata['metadata_json_final_bytes'] == header['metadata_json_size']
 assert not metadata['metadata_event_detail_truncated']
 assert metadata['firmware_revision']=='1.0.52-wheel-bias-usb'
 for manifest in ('site/manifest.json','site/manifest-freefoot-runtime-v2.json'):
-    assert json.loads(Path(manifest).read_text())['version']==metadata['firmware_revision']
+    cfg=json.loads(Path(manifest).read_text())
+    assert cfg['version']==metadata['firmware_revision']
+    assert cfg['new_install_improv_wait_time']==0
 assert metadata['energy_model']=='angle_energy_bridge'
 assert metadata['energy_control_autonomous_revision']=='lateral_energy_angle_bridge_v8_20261015'
 assert metadata['energy_control_autonomous_negative_side_brake_width_max_ms']==0
