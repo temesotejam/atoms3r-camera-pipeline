@@ -3296,6 +3296,35 @@ wheel_work_energy_control::Choice ExperimentRunner::chooseWheelWork(
   return choice;
 }
 
+void ExperimentRunner::choosePeakMpc(PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
+    float fast_v,wheel_work_energy_control::Choice& work_choice,int16_t& selected_current_mA,
+    const lateral_energy::CurrentTable*& selected_current_table) const {
+  if (event.target_peak_deg==8.f && work_choice.valid &&
+      work_choice.command_sign==1 && work_choice.width_ms>=30 &&
+      ((event.physical_next_peak_side>0 && work_choice.current_ma==400) ||
+       (event.physical_next_peak_side<0 && work_choice.branch==10))) {
+    bool alternate_supported=false;
+    int16_t alternate_current=selected_current_mA;
+    const lateral_energy::CurrentTable* alternate_table=selected_current_table;
+    const auto alternative=chooseWheelWork(event,fast_v,&alternate_supported,
+        &alternate_current,&alternate_table,work_choice.width_ms-5);
+    if(alternative.valid && alternative.command_sign==work_choice.command_sign &&
+       alternative.current_ma==work_choice.current_ma) {
+      const peak_mpc::State state{event.zero_cross_abs_rate_dps,event.pre_input_wheel_speed_rpm,
+          event.previous_peak_amplitude_deg,static_cast<float>(event.vbat_mV),event.physical_next_peak_side};
+      if(peak_error_adaptation::speedUsable(event.pre_input_wheel_speed_rpm,event.pre_input_wheel_speed_valid,event.pre_input_wheel_speed_age_us)) {
+        const float next_target=8.f+(event.physical_next_peak_side>0 ? foot_balance_.negativeOffsetDeg() : foot_balance_.positiveOffsetDeg());
+        const auto result=peak_mpc::choose(state,work_choice.width_ms,alternative.width_ms,event.foot_balance_target_deg,next_target);
+        if(result.valid) {
+          event.mpc_valid=true;event.mpc_alternate=result.alternate;
+          event.mpc_second_peak_deg=result.second_peak;event.mpc_speed_proxy_rpm=result.mean_rpm;
+          if(result.alternate) {work_choice=alternative;selected_current_mA=alternate_current;selected_current_table=alternate_table;}
+        }
+      }
+    }
+  }
+}
+
 void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(uint32_t t_test_ms, float rate_dps,
                                                                   float detector_before_deg,
                                                                   float detector_after_deg,
@@ -3476,30 +3505,7 @@ void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(uint32_t t_test_
   if (work_mode)
     work_choice=chooseWheelWork(event,fast_v,&event.rate_support_diagnostic,
         &selected_current_mA,&selected_current_table);
-  if (work_mode && event.target_peak_deg==8.f && work_choice.valid &&
-      work_choice.command_sign==1 && work_choice.width_ms>=30 &&
-      ((event.physical_next_peak_side>0 && work_choice.current_ma==400) ||
-       (event.physical_next_peak_side<0 && work_choice.branch==10))) {
-    bool alternate_supported=false;
-    int16_t alternate_current=selected_current_mA;
-    const lateral_energy::CurrentTable* alternate_table=selected_current_table;
-    const auto alternative=chooseWheelWork(event,fast_v,&alternate_supported,
-        &alternate_current,&alternate_table,work_choice.width_ms-5);
-    if(alternative.valid && alternative.command_sign==work_choice.command_sign &&
-       alternative.current_ma==work_choice.current_ma) {
-      const peak_mpc::State state{event.zero_cross_abs_rate_dps,event.pre_input_wheel_speed_rpm,
-          event.previous_peak_amplitude_deg,static_cast<float>(event.vbat_mV),event.physical_next_peak_side};
-      if(peak_error_adaptation::speedUsable(event.pre_input_wheel_speed_rpm,event.pre_input_wheel_speed_valid,event.pre_input_wheel_speed_age_us)) {
-        const float next_target=8.f+(event.physical_next_peak_side>0 ? foot_balance_.negativeOffsetDeg() : foot_balance_.positiveOffsetDeg());
-        const auto result=peak_mpc::choose(state,work_choice.width_ms,alternative.width_ms,event.foot_balance_target_deg,next_target);
-        if(result.valid) {
-          event.mpc_valid=true;event.mpc_alternate=result.alternate;
-          event.mpc_second_peak_deg=result.second_peak;event.mpc_speed_proxy_rpm=result.mean_rpm;
-          if(result.alternate) {work_choice=alternative;selected_current_mA=alternate_current;selected_current_table=alternate_table;}
-        }
-      }
-    }
-  }
+  if(work_mode) choosePeakMpc(event,fast_v,work_choice,selected_current_mA,selected_current_table);
   if (work_mode) captureWheelWorkDecision(event,work_choice);
 
   const float goal_current_mA = predictCurrentGoalMa(selected_current_mA,fast_v);

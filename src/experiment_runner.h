@@ -373,6 +373,9 @@ private:
       const PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
       float fast_v, bool* state_supported, int16_t* selected_current_ma,
       const lateral_energy::CurrentTable** selected_current_table,uint16_t positive_or_walking_cap_ms=100) const;
+  void __attribute__((noinline)) choosePeakMpc(PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
+      float fast_v,wheel_work_energy_control::Choice& choice,int16_t& current,
+      const lateral_energy::CurrentTable*& table) const;
   void __attribute__((noinline)) selectPositiveCurrentBatch(
       PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
       int16_t& selected_current_mA,
