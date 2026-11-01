@@ -79,3 +79,8 @@ Eight unpowered negative arrivals at 323.90–360.33 rpm show coast prediction R
 ### 2026-11-01: runs 31767392, 27579224 and 33892778
 
 Thirteen previously unsupported unpowered arrivals add measured low-speed coast evidence down to 13.8 deg/s and 274.92 rpm and up to a previous peak of 7.64 degrees. The model's held-out coast error is checked against these records. The domain is extended to rate 13.75–37.80 deg/s, wheel speed 274.90–603.21 rpm and previous peak 4.3006–7.65 degrees. Powered response in the new low-speed domain remains unvalidated. Wheel speed bias correction releases the positive-side cap when the most recent negative-side peak is less than 4 degrees, giving priority to sustaining oscillation; both mechanisms remain provisional.
+
+
+### 2026-11-01: runs 50202353 and 275876204
+
+These closed-loop trials repeatedly saturated negative assist at 60 ms. Wheel speed at the next negative peak stayed positive in many samples while the peak remained below target. The experimental controller can extend its 60 ms cap by 5 ms to at most 75 ms after three matched capped under-target arrivals with fresh wheel speed at least +30 rpm at the peak. Missing, stale, or lower arrival speed restores the 60 ms cap. Overshoot and existing geometry, energy, charge, motor-current and stop guards remain in force. Arrival speed is a delayed diagnostic, not a guarantee of no zero crossing during a pulse. Neither the sign nor magnitude of additional body energy, nor yaw improvement, is validated for 65–75 ms.

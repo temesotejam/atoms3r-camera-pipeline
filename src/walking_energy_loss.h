@@ -26,25 +26,35 @@ class Feedback {
     float sum=0.f;for(unsigned i=0;i<count_;++i)sum+=residual_[i];
     return std::fmax(-.10f,std::fmin(.10f,sum/count_));
   }
-  // Two matched coast arrivals first. The 45–60 ms extension is experimental.
+  // Two matched coast arrivals first. Inputs above 60 ms are experimental.
   // Raise the cap only after two completed
   // matching powered arrivals below target at the current cap.
   uint16_t capMs() const { return count_>=2 && !overshot_ ? cap_ms_ : 0; }
-  bool observe(float actual_mj,float raw_mj,float target_mj,uint16_t width_ms=0) {
+  bool observe(float actual_mj,float raw_mj,float target_mj,uint16_t width_ms=0,
+               float arrival_rpm=NAN,bool arrival_rpm_fresh=false) {
     if(!std::isfinite(actual_mj)||!std::isfinite(raw_mj)||
-       !std::isfinite(target_mj)||actual_mj<0.f||raw_mj<0.f||target_mj<=0.f) return false;
+       !std::isfinite(target_mj)||actual_mj<0.f||raw_mj<0.f||target_mj<=0.f) {limited_count_=0;extended_count_=0;return false;}
     overshot_=actual_mj>=target_mj;
-    if(overshot_) { cap_ms_=cap_ms_>25 ? cap_ms_-5 : 25; limited_count_=0; }
-    if(std::fabs(actual_mj-raw_mj)>.15f) { limited_count_=0; return false; }
+    if(overshot_) { cap_ms_=cap_ms_>25 ? cap_ms_-5 : 25; limited_count_=0;extended_count_=0; }
+    if(cap_ms_>60 && (!arrival_rpm_fresh || !std::isfinite(arrival_rpm) || arrival_rpm<30.f)) {
+      cap_ms_=60;extended_count_=0;
+    }
+    if(std::fabs(actual_mj-raw_mj)>.15f) { limited_count_=0;extended_count_=0;return false; }
     if(width_ms>0 && width_ms>=cap_ms_ && actual_mj<target_mj-.03f) {
-      if(++limited_count_>=2) { if(cap_ms_<60)cap_ms_+=5;limited_count_=0; }
-    } else if(width_ms>0) limited_count_=0;
+      if(cap_ms_<60) {
+        if(++limited_count_>=2) { cap_ms_+=5;limited_count_=0; }
+      } else if(arrival_rpm_fresh && std::isfinite(arrival_rpm) && arrival_rpm>=30.f) {
+        // Experimental 65–75 ms: three matched, capped, below-target
+        // arrivals with a fresh same-direction wheel speed still positive.
+        if(++extended_count_>=3) {if(cap_ms_<75)cap_ms_+=5;extended_count_=0;}
+      } else extended_count_=0;
+    } else if(width_ms>0) {limited_count_=0;extended_count_=0;}
     residual_[next_]=actual_mj-raw_mj;next_=(next_+1)%3;
     if(count_<3)++count_;
     return true;
   }
  private:
-  float residual_[3]={};unsigned count_=0,next_=0,limited_count_=0;
+  float residual_[3]={};unsigned count_=0,next_=0,limited_count_=0,extended_count_=0;
   uint16_t cap_ms_=25;bool overshot_=false;
 };
 __attribute__((noinline)) inline wheel_work_energy_control::Choice choose(

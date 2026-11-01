@@ -64,6 +64,21 @@ int main(int argc,char** argv) {
   assert(adaptive.capMs()==60);
   assert(adaptive.observe(target,target,target,60));assert(adaptive.capMs()==0);
   assert(adaptive.observe(raw,raw,target));assert(adaptive.capMs()==55);
+  // Extension requires fresh, positive arrival speed and three matched
+  // capped arrivals. Missing or low speed returns the cap to 60 ms.
+  Feedback speed;assert(speed.observe(raw,raw,target));assert(speed.observe(raw,raw,target));
+  for(int i=0;i<14;++i)assert(speed.observe(raw,raw,target,speed.capMs()));
+  assert(speed.capMs()==60);
+  assert(speed.observe(raw,raw,target,60,40.f,true));
+  assert(!speed.observe(NAN,raw,target,60,40.f,true));
+  assert(speed.observe(raw,raw,target,60,40.f,true));
+  assert(speed.observe(raw,raw,target,60,40.f,true));assert(speed.capMs()==60);
+  assert(speed.observe(raw,raw,target,60,40.f,true));assert(speed.capMs()==65);
+  assert(speed.observe(raw,raw,target,65,NAN,false));assert(speed.capMs()==60);
+  for(int i=0;i<9;++i)assert(speed.observe(raw,raw,target,speed.capMs(),40.f,true));
+  assert(speed.capMs()==75);
+  assert(speed.observe(raw,raw,target,75,29.f,true));assert(speed.capMs()==60);
+  assert(speed.observe(target,target,target,60,40.f,true));assert(speed.capMs()==0);
   if(argc>1) {
     float rate,rpm,battery,previous,peak;unsigned count=0;float squared=0;
     while(std::cin>>rate>>rpm>>battery>>previous>>peak) {

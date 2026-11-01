@@ -66,3 +66,11 @@ assert all(13.75<=v['rate_dps']<=37.8 and 274.9<=v['rpm']<=603.21 and 4.3006<=v[
 errors=[.09046158+.00018973*v['rate_dps']**2-potential(v['peak_deg']) for v in new]
 assert (sum(e*e for e in errors)/len(errors))**.5 < .031
 print('Eight runs: thirteen low-speed unpowered observations PASS')
+
+# Observed 60 ms arrivals inform the additional speed gate; these samples do
+# not validate motor input durations beyond 60 ms or establish causation.
+latest=json.loads(Path('tools/fixtures/walking_60ms_arrivals_502_276.json').read_text())['records']
+assert len(latest)>=25
+fresh=[r for r in latest if r['peak_rpm_valid'] and r['peak_speed_age_us']<=30000]
+assert len(fresh)>=25 and sum(r['peak_rpm']>=30 and r['peak_deg']<r['target_deg'] for r in fresh)>=20
+print('Recorded 60 ms arrivals: fresh peak speed and below-target evidence PASS')
