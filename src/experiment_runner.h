@@ -13,6 +13,7 @@
 #include "wheel_work_energy_control.h"
 #include "walking_energy_loss.h"
 #include "wheel_speed_balance.h"
+#include "gradual_start.h"
 #include "foot_balance_adaptive.h"
 #include "target12_state_work.h"
 #include "peak_error_adaptation.h"
@@ -146,6 +147,7 @@ public:
   const char* presetName() const { return "MEKF_ADOPTED_DYNAMIC_BETA_COMPARE_V46"; }
 
 private:
+  gradual_start::Controller gradual_start_;
   foot_balance_adaptive::Controller foot_balance_;
   wheel_speed_balance::Controller wheel_speed_balance_;
   uint16_t foot_frame_run_id_=0;

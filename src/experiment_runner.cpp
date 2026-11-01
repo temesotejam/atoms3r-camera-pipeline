@@ -2530,7 +2530,7 @@ void ExperimentRunner::resetEnergyControlAutonomous() {
   work_negative_feedback_ = wheel_work_energy_control::NegativeFeedback{};
   walking_loss_feedback_=walking_energy_loss::Feedback{};
   work_walking_pending_=false;
-  foot_balance_.reset(status_.run_id);wheel_speed_balance_.reset();foot_frame_run_id_=0;
+  foot_balance_.reset(status_.run_id);wheel_speed_balance_.reset();gradual_start_.reset();foot_frame_run_id_=0;
   foot_frame_left_valid_=foot_frame_right_valid_=false;pending_target_energy_j_=NAN;
   for (auto& feedback : work_positive_feedback_) feedback=wheel_work_energy_control::SideEnergyFeedback{};
   work_negative_assist_feedback_=wheel_work_energy_control::NegativeAssistFeedback{};
@@ -2896,6 +2896,9 @@ bool ExperimentRunner::recordEnergyControlAutonomousPeak(uint32_t peak_ms, int8_
     event.peak_wheel_speed_rpm=event.peak_speed_valid ? telemetry.speed_rpm : NAN;
     event.peak_measured_current_mA=event.peak_current_valid ? telemetry.actual_current_mA : NAN;
   }
+  if(wheelWorkMode() && energy_control_autonomous_target_peak_deg_==8.f)
+    gradual_start_.peak(physical_side,amplitude_deg,event.peak_wheel_speed_rpm,
+        event.peak_speed_valid && event.peak_speed_age_us<=30000,peak_ms);
   event.energy_error_j = event.target_energy_j - event.measured_energy_j;
   if (event.pending_command_matched && !energy_control_autonomous_pending_probe_ &&
       std::isfinite(event.measured_energy_j) &&
@@ -3313,7 +3316,7 @@ void ExperimentRunner::choosePeakMpc(PsramLogger::EnergyControlAutonomousZeroCro
       const peak_mpc::State state{event.zero_cross_abs_rate_dps,event.pre_input_wheel_speed_rpm,
           event.previous_peak_amplitude_deg,static_cast<float>(event.vbat_mV),event.physical_next_peak_side};
       if(peak_error_adaptation::speedUsable(event.pre_input_wheel_speed_rpm,event.pre_input_wheel_speed_valid,event.pre_input_wheel_speed_age_us)) {
-        const float next_target=8.f+(event.physical_next_peak_side>0 ? foot_balance_.negativeOffsetDeg() : foot_balance_.positiveOffsetDeg());
+        const float next_target=gradual_start_.target()+(event.physical_next_peak_side>0 ? foot_balance_.negativeOffsetDeg() : foot_balance_.positiveOffsetDeg());
         const auto result=peak_mpc::choose(state,work_choice.width_ms,alternative.width_ms,event.foot_balance_target_deg,next_target);
         if(result.valid) {
           event.mpc_valid=true;event.mpc_alternate=result.alternate;
@@ -3446,7 +3449,9 @@ void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(uint32_t t_test_
   event.target_energy_j = wheelWorkMode() ? controlPotential(event.physical_next_peak_side * event.target_peak_deg) : lateral_target_energy_j_;
   if(wheelWorkMode() && event.target_peak_deg==8.f) {
     const float offset=event.physical_next_peak_side<0 ? foot_balance_.negativeOffsetDeg() : foot_balance_.positiveOffsetDeg();
-    const float adjusted=event.target_peak_deg+offset;
+    const float adjusted=gradual_start_.target()+offset;
+    event.startup_target_deg=gradual_start_.target();
+    event.startup_positive_cap_ms=gradual_start_.positiveCapMs();
     event.foot_balance_target_deg=adjusted;
     event.foot_balance_left_mean=foot_balance_.leftMean();
     event.foot_balance_right_mean=foot_balance_.rightMean();
@@ -3504,7 +3509,8 @@ void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(uint32_t t_test_
   wheel_work_energy_control::Choice work_choice;
   if (work_mode)
     work_choice=chooseWheelWork(event,fast_v,&event.rate_support_diagnostic,
-        &selected_current_mA,&selected_current_table);
+        &selected_current_mA,&selected_current_table,
+        event.target_peak_deg==8.f && event.physical_next_peak_side>0 ? gradual_start_.positiveCapMs() : 100);
   if(work_mode) choosePeakMpc(event,fast_v,work_choice,selected_current_mA,selected_current_table);
   if (work_mode) captureWheelWorkDecision(event,work_choice);
 
