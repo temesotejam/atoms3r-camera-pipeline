@@ -17,6 +17,8 @@
 #include "gradual_start.h"
 #include "foot_balance_adaptive.h"
 #include "foot_energy_balance.h"
+#include "foot_phase_observer.h"
+#include "foot_phase_cap.h"
 #include "target12_state_work.h"
 #include "peak_error_adaptation.h"
 #include "upright_reference.h"
@@ -152,6 +154,15 @@ private:
   gradual_start::Controller gradual_start_;
   foot_balance_adaptive::Controller foot_balance_;
   foot_energy_balance::Controller foot_energy_;
+  foot_phase_observer::Observer foot_phase_observer_;
+  foot_phase_cap::Controller foot_phase_cap_;
+  struct PhaseNegativePeak { uint32_t ms=0; float amplitude=NAN; };
+  struct PhaseNegativeDecision { uint32_t ms=0; bool known=false,executed=false; };
+  PhaseNegativePeak phase_negative_peaks_[8];
+  PhaseNegativeDecision phase_negative_decisions_[8];
+  unsigned phase_negative_peak_next_=0,phase_negative_decision_next_=0;
+  uint32_t phase_observer_sequence_=0;
+  void __attribute__((noinline)) processFootPhaseCycle(uint32_t now_ms);
   wheel_speed_balance::Controller wheel_speed_balance_;
   uint16_t foot_frame_run_id_=0;
   uint32_t foot_frame_ms_=0;
@@ -378,6 +389,9 @@ private:
       const PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
       float fast_v, bool* state_supported, int16_t* selected_current_ma,
       const lateral_energy::CurrentTable** selected_current_table,uint16_t positive_or_walking_cap_ms=100) const;
+  wheel_work_energy_control::Choice __attribute__((noinline)) chooseFootPhaseWidth(
+      const PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
+      const wheel_work_energy_control::Choice& baseline,uint16_t width,float fast_v) const;
   void __attribute__((noinline)) choosePeakMpc(PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
       float fast_v,wheel_work_energy_control::Choice& choice,int16_t& current,
       const lateral_energy::CurrentTable*& table) const;

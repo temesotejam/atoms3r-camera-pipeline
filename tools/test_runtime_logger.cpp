@@ -209,6 +209,9 @@ int main(int argc,char** argv){
         z.foot_balance_right_mean=.2f;z.target_energy_j=.00076f;
         z.foot_energy_bias=.08f;z.foot_energy_left_px=20.f;z.foot_energy_right_px=2.f;z.foot_energy_valid=true;z.foot_energy_phase=3;z.foot_energy_reason=4;z.low_peak_bias_mj=.08f;z.low_peak_active=true;
         z.low_peak_selected=true;z.low_peak_base_width_ms=80;z.low_peak_base_prediction_mj=.281f;z.low_peak_applied_bias_mj=.08f;
+        z.foot_phase_left_deg=2.1f;z.foot_phase_right_deg=-.2f;z.foot_phase_start_ms=1000;z.foot_phase_end_ms=1800;
+        z.foot_phase_baseline_ms=80;z.foot_phase_requested_ms=75;z.foot_phase_state=1;z.foot_phase_reason=0;
+        z.foot_phase_valid=true;z.foot_phase_selected=true;
       }
       work.addEnergyControlAutonomousZeroCrossEvent(z);
     }

@@ -61,12 +61,15 @@ header = converter.parse_header(data)
 metadata = converter.expand_tables(json.loads(data[110:110+header['metadata_json_size']], parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value))))
 assert metadata['metadata_json_final_bytes'] == header['metadata_json_size']
 assert not metadata['metadata_event_detail_truncated']
-assert metadata['firmware_revision']=='1.0.58-low-peak-energy'
+assert metadata['firmware_revision']=='1.0.59-foot-phase-balance'
 for manifest in ('site/manifest.json','site/manifest-freefoot-runtime-v2.json'):
     cfg=json.loads(Path(manifest).read_text())
     assert cfg['version']==metadata['firmware_revision']
     assert cfg['new_install_improv_wait_time']==0
 assert metadata['energy_model']=='angle_energy_bridge'
+assert metadata['peak_mpc']['active'] is False
+assert metadata['low_peak_energy_feedback']['active_for_output'] is False
+assert metadata['foot_phase_cap']['hardware_validated'] is False
 assert metadata['energy_control_autonomous_revision']=='lateral_energy_angle_bridge_v8_20261015'
 assert metadata['energy_control_autonomous_negative_side_brake_width_max_ms']==0
 assert metadata['energy_control_autonomous_integral_Ki_J_per_J'] is None
@@ -301,6 +304,11 @@ for work_first, suffix in ((False, '.fallback-first.rwlog'), (True, '.work-first
             assert event['low_peak_selected'] is True and event['low_peak_base_width_ms']==80
             assert abs(event['low_peak_base_prediction_mj']-.281)<.00001
             assert abs(event['low_peak_applied_bias_mj']-.08)<.00001
+            assert abs(event['foot_phase_left_deg']-2.1)<.00001 and abs(event['foot_phase_right_deg']+.2)<.00001
+            assert event['foot_phase_start_ms']==1000 and event['foot_phase_end_ms']==1800
+            assert event['foot_phase_baseline_ms']==80 and event['foot_phase_requested_ms']==75
+            assert event['foot_phase_state']==1 and event['foot_phase_reason']==0
+            assert event['foot_phase_valid'] and event['foot_phase_selected']
             assert abs(event['target_energy_j']-.00076)<.000001
             assert work_metadata['walking_energy_loss']['independent_validation'] is False
             assert work_metadata['walking_energy_loss']['low_rpm_coast_observations']==26

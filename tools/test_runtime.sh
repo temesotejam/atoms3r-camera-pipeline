@@ -2,6 +2,13 @@
 set -euo pipefail
 python3 tools/embed_runtime_web.py --check
 
+g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_phase_observer.cpp -o /tmp/test_foot_phase_observer
+/tmp/test_foot_phase_observer
+g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_phase_cap.cpp -o /tmp/test_foot_phase_cap
+/tmp/test_foot_phase_cap
+g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_phase_run_replay.cpp -o /tmp/test_foot_phase_run_replay
+g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_phase_cap_replay.cpp -o /tmp/test_phase_cap_replay
+
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_peak_mpc.cpp -o /tmp/test_peak_mpc
 /tmp/test_peak_mpc
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_gradual_start.cpp -o /tmp/test_gradual_start

@@ -372,6 +372,11 @@ class PsramLogger {
     bool foot_energy_valid=false;uint8_t foot_energy_phase=0,foot_energy_reason=0;
     float low_peak_bias_mj=NAN,low_peak_base_prediction_mj=NAN,low_peak_applied_bias_mj=NAN;
     uint16_t low_peak_base_width_ms=0;bool low_peak_active=false,low_peak_selected=false;
+    float foot_phase_left_deg=NAN,foot_phase_right_deg=NAN;
+    uint32_t foot_phase_start_ms=0,foot_phase_end_ms=0;
+    uint16_t foot_phase_baseline_ms=0,foot_phase_requested_ms=0;
+    uint8_t foot_phase_state=0,foot_phase_reason=0;
+    bool foot_phase_valid=false,foot_phase_selected=false;
     float target_energy_j = NAN;
     float delta_energy_required_j = NAN;
     float kinetic_energy_j=NAN, predicted_loss_j=NAN, integral_energy_j=NAN;
