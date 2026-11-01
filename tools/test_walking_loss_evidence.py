@@ -58,3 +58,11 @@ errors=[.09046158+.00018973*v['rate_dps']**2-potential(v['peak_deg']) for v in c
 assert (sum(e*e for e in errors)/len(errors))**.5 < .025
 assert len([v for v in fifth if v['pulse_ms']==40 and v['output']])==15
 print('Fifth run: eight low-rpm unpowered observations and 15 capped powered arrivals PASS')
+
+# Additional low-rate, low-rpm walking coasts; not powered validation.
+new=json.loads(Path('tools/fixtures/walking_317_275_338.json').read_text())['records']
+assert len(new)==13 and all(not v['output'] and v['pulse_ms']==0 for v in new)
+assert all(13.75<=v['rate_dps']<=37.8 and 274.9<=v['rpm']<=603.21 and 4.3006<=v['previous_deg']<=7.65 for v in new)
+errors=[.09046158+.00018973*v['rate_dps']**2-potential(v['peak_deg']) for v in new]
+assert (sum(e*e for e in errors)/len(errors))**.5 < .031
+print('Eight runs: thirteen low-speed unpowered observations PASS')

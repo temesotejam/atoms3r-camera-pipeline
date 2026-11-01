@@ -74,3 +74,8 @@
 ### 2026-11-01: run 55836070
 
 Eight unpowered negative arrivals at 323.90–360.33 rpm show coast prediction RMSE 0.0249 mJ; this extends the lower rpm bound to 323.9. These are observations under walking, not proof of the loss mechanism. The run also reached 40 ms fifteen times while the negative-side peaks remained below target. The cap may increase by 5 ms after each two accepted below-target capped arrivals, up to 60 ms; 45–60 ms remains unvalidated on the robot, and an overshoot stops the assist and reduces the cap. The motor power, output, freshness and other domain guards remain in force.
+
+
+### 2026-11-01: runs 31767392, 27579224 and 33892778
+
+Thirteen previously unsupported unpowered arrivals add measured low-speed coast evidence down to 13.8 deg/s and 274.92 rpm and up to a previous peak of 7.64 degrees. The model's held-out coast error is checked against these records. The domain is extended to rate 13.75–37.80 deg/s, wheel speed 274.90–603.21 rpm and previous peak 4.3006–7.65 degrees. Powered response in the new low-speed domain remains unvalidated. Wheel speed bias correction releases the positive-side cap when the most recent negative-side peak is less than 4 degrees, giving priority to sustaining oscillation; both mechanisms remain provisional.

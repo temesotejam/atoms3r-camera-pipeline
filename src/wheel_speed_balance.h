@@ -7,13 +7,17 @@ namespace wheel_speed_balance {
 class Controller {
  public:
   void reset() { *this=Controller{}; }
-  void peak(int side,float angle) { if(side>0 && std::isfinite(angle)) positive_peak_=angle; }
+  void peak(int side,float angle) {
+    if(!std::isfinite(angle)) return;
+    if(side>0) positive_peak_=angle; else if(side<0) negative_peak_=angle;
+  }
   void crossing(int side,float rpm,bool fresh,uint32_t ms) {
     if(!fresh || !std::isfinite(rpm)) { reset(); return; }
     if(side<0) { negative_rpm_=rpm;negative_ms_=ms;have_negative_=true;return; }
     if(side!=1) return;
     if(!have_negative_ || ms<=negative_ms_ || ms-negative_ms_>1500 ||
-       !std::isfinite(positive_peak_) || positive_peak_<5.f) { cap_=100;biased_=0;have_negative_=false;return; }
+       !std::isfinite(positive_peak_) || positive_peak_<5.f ||
+       !std::isfinite(negative_peak_) || negative_peak_<4.f) { cap_=100;biased_=0;have_negative_=false;return; }
     const bool biased=negative_rpm_>=250.f && rpm>=-20.f && rpm<=150.f && negative_rpm_-rpm>=250.f;
     if(biased) { if(++biased_>=2) {if(cap_>80)cap_-=5;biased_=0;} }
     else {biased_=0;if(cap_<100)cap_+=5;}
@@ -21,7 +25,7 @@ class Controller {
   }
   uint16_t capMs() const {return cap_;}
  private:
-  float negative_rpm_=NAN,positive_peak_=NAN;
+  float negative_rpm_=NAN,positive_peak_=NAN,negative_peak_=NAN;
   uint32_t negative_ms_=0;uint16_t cap_=100;unsigned biased_=0;bool have_negative_=false;
 };
 }

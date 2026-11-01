@@ -20,6 +20,8 @@ int main(int argc,char** argv) {
   alternate.battery_mv=7000;assert(supported(alternate));
   alternate.battery_mv=8120;assert(supported(alternate));
   alternate.battery_mv=8121;assert(!supported(alternate));
+  State new_coast{13.8f,277.8f,7510.f,true,7.37f};new_coast.absolute_reference=true;
+  assert(supported(new_coast));assert(choose(g,new_coast,table,0,280,target,f,0).valid);
   auto c=choose(g,s,table,0,280,target,f,0);
   assert(c.valid&&c.branch==10&&c.width_ms==0&&c.walking_loss_mj>0);
   assert(c.cross_condition&&c.support_weight==0);
@@ -38,11 +40,11 @@ int main(int argc,char** argv) {
   for(int i=0;i<9;++i) {
     State bad=s;
     if(i==0)bad.wheel_fresh=false;
-    if(i==1)bad.rate_dps=18.f;
+    if(i==1)bad.rate_dps=13.f;
     if(i==2)bad.rate_dps=38.f;
     if(i==3)bad.wheel_rpm=620;
     if(i==4)bad.battery_mv=6900;
-    if(i==5)bad.previous_peak_deg=7;
+    if(i==5)bad.previous_peak_deg=7.7f;
     if(i==6)bad.target_deg=10;
     if(i==7)bad.absolute_reference=false;
     if(i==8)bad.rate_dps=NAN;
