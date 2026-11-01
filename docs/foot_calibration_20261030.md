@@ -37,3 +37,8 @@ Source values and capture identities are retained in
 `tools/fixtures/foot_calibration_20261030.json`. Historical fixtures keep their
 original calibration semantics. This change affects vision observation only;
 the RW amplitude controller is unchanged.
+
+
+## 2026-11-01 repeat endpoint
+
+Two additional supplied vision diagnostics (1224, 1519) were incorporated provisionally, assuming the same fixed-foot, rotating body/camera protocol. Their body-roll change is 20.574717 degrees. Their observed marker displacement is normalized to the original upright marker positions, then the resulting endpoint and reference angle are averaged with the original endpoint. The three intermediate points and the per-boot zero procedure are retained. The new evidence and formula are recorded in `tools/fixtures/foot_calibration_20261101.json`. The repeat captures are hand-supported and cannot independently establish angular accuracy, marker-centering accuracy, or whether the feet moved in the real world.

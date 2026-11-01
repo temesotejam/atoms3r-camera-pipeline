@@ -35,18 +35,24 @@ assert inputs['accel_g']==[.01,.02,1]
 for actual,expected in zip(inputs['gyro_dps'],[1,2,3]): assert abs(actual-expected)<.00001
 for actual,expected in zip(inputs['gyro_bias_dps'],[.1,-.2,.3]): assert abs(actual-expected)<.00001
 assert inputs['last_accel_update']['used'] and inputs['last_accel_update']['confidence']>.99
-evidence=json.loads(Path('tools/fixtures/foot_calibration_20261030.json').read_text())
+evidence=json.loads(Path('tools/fixtures/foot_calibration_20261101.json').read_text())
 calibration=diagnostics['calibration']
-assert calibration['revision']=='fixed_leg_five_pose_20261030' and calibration['provisional']
+assert calibration['revision']=='fixed_leg_five_pose_repeat_20261101' and calibration['provisional']
 assert calibration['fit_poses']==5 and calibration['heldout_hand_supported_poses']==0
 assert calibration['outside_range_policy']=='extrapolate_nearest_endpoint_segment_and_save'
 assert not calibration['independent_angular_accuracy_validated']
 import hashlib
-assert calibration['source_sha256']==hashlib.sha256(Path('tools/fixtures/foot_calibration_20261030.json').read_bytes()).hexdigest()
+assert calibration['source_sha256']==hashlib.sha256(Path('tools/fixtures/foot_calibration_20261101.json').read_bytes()).hexdigest()
 for side in ('right','left'):
-    records=evidence['records']
-    assert diagnostics['range'][side+'_support_x']==[records[-1][side+'_x'],records[0][side+'_x']]
-    for point, record in zip(calibration[side+'_points'],reversed(records)):
+    records=evidence['original_records']
+    repeat=evidence['repeat_records']
+    endpoint=(records[-1][side+'_x']+repeat[-1][side+'_x']+records[0][side+'_x']-repeat[0][side+'_x'])/2
+    angle=(records[-1]['reference_angle_deg']+repeat[0]['roll_deg']-repeat[-1]['roll_deg'])/2
+    assert abs(diagnostics['range'][side+'_support_x'][0]-endpoint)<.0001
+    assert abs(diagnostics['range'][side+'_support_x'][1]-records[0][side+'_x'])<.0001
+    assert abs(calibration[side+'_points'][0][0]-endpoint)<.0001
+    assert abs(calibration[side+'_points'][0][1]-angle)<.00001
+    for point, record in zip(calibration[side+'_points'][1:],reversed(records[:-1])):
         assert abs(point[0]-record[side+'_x'])<.0001
         assert abs(point[1]-record['reference_angle_deg'])<.00001
 source = Path('/tmp/runtime-fixture.rwlog')
@@ -55,7 +61,7 @@ header = converter.parse_header(data)
 metadata = converter.expand_tables(json.loads(data[110:110+header['metadata_json_size']], parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value))))
 assert metadata['metadata_json_final_bytes'] == header['metadata_json_size']
 assert not metadata['metadata_event_detail_truncated']
-assert metadata['firmware_revision']=='1.0.45-walking-rpm'
+assert metadata['firmware_revision']=='1.0.46-foot-symmetry'
 for manifest in ('site/manifest.json','site/manifest-freefoot-runtime-v2.json'):
     assert json.loads(Path(manifest).read_text())['version']==metadata['firmware_revision']
 assert metadata['energy_model']=='angle_energy_bridge'
@@ -280,8 +286,8 @@ for work_first, suffix in ((False, '.fallback-first.rwlog'), (True, '.work-first
         if fallback:
             assert event['arrival_energy_model_revision'] is None
         elif walking:
-            assert event['arrival_energy_model_revision'] == 'walking_coast_three_runs_v3'
-            assert event['free_model_revision'] == 'walking_coast_three_runs_v3'
+            assert event['arrival_energy_model_revision'] == 'walking_coast_four_runs_v4'
+            assert event['free_model_revision'] == 'walking_coast_four_runs_v4'
             assert event['predicted_loss_j'] == .00014
             assert abs(event['foot_balance_target_deg']-8.2)<.00001
             assert abs(event['foot_balance_left_mean']-2.5)<.00001

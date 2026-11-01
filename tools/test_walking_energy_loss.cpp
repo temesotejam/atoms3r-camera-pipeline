@@ -38,8 +38,8 @@ int main(int argc,char** argv) {
   for(int i=0;i<9;++i) {
     State bad=s;
     if(i==0)bad.wheel_fresh=false;
-    if(i==1)bad.rate_dps=24.f;
-    if(i==2)bad.rate_dps=37.f;
+    if(i==1)bad.rate_dps=18.f;
+    if(i==2)bad.rate_dps=38.f;
     if(i==3)bad.wheel_rpm=620;
     if(i==4)bad.battery_mv=6900;
     if(i==5)bad.previous_peak_deg=7;
@@ -53,6 +53,15 @@ int main(int argc,char** argv) {
   Feedback over;assert(over.observe(target,target,target));
   assert(over.observe(target,target,target));assert(over.capMs()==0);
   assert(!f.observe(target+.5f,raw,target));assert(f.capMs()==0);
+  Feedback adaptive;
+  assert(adaptive.observe(raw,raw,target));assert(adaptive.observe(raw,raw,target));
+  assert(adaptive.capMs()==25);
+  assert(adaptive.observe(raw,raw,target,25));assert(adaptive.capMs()==25);
+  assert(adaptive.observe(raw,raw,target,25));assert(adaptive.capMs()==30);
+  for(int i=0;i<10;++i)assert(adaptive.observe(raw,raw,target,adaptive.capMs()));
+  assert(adaptive.capMs()==40);
+  assert(adaptive.observe(target,target,target,40));assert(adaptive.capMs()==0);
+  assert(adaptive.observe(raw,raw,target));assert(adaptive.capMs()==35);
   if(argc>1) {
     float rate,rpm,battery,previous,peak;unsigned count=0;float squared=0;
     while(std::cin>>rate>>rpm>>battery>>previous>>peak) {
@@ -62,7 +71,8 @@ int main(int argc,char** argv) {
       const float error=pred.energy_mj-1000.f*lateral_energy::potential(g,peak);
       squared+=error*error;++count;
     }
-    if(argv[1][0]=='t') assert(count==31&&std::sqrt(squared/count)<.031f);
+    if(argv[1][0]=='f') assert(count==18&&std::sqrt(squared/count)<.043f);
+    else if(argv[1][0]=='t') assert(count==31&&std::sqrt(squared/count)<.031f);
     else assert(count==32&&std::sqrt(squared/count)<.019f);
   }
   std::cout<<"Walking loss balance, one residual, strict domain, bounded assist and recorded coast replay PASS\n";

@@ -6,14 +6,14 @@
 // run 50881356. All energies here are mJ. Never add this loss to the old
 // side-bias correction: this is a separate, mutually exclusive branch.
 namespace walking_energy_loss {
-constexpr char kRevision[]="walking_coast_three_runs_v3";
+constexpr char kRevision[]="walking_coast_four_runs_v4";
 inline bool supported(const wheel_work_energy_control::State& s) {
   return s.absolute_reference && s.target_deg==8.f &&
       wheel_work_energy_control::freshFinite(s) &&
-      s.rate_dps>=24.7827f && s.rate_dps<=36.875f &&
-      s.wheel_rpm>=446.5f && s.wheel_rpm<=603.21f &&
+      s.rate_dps>=18.45f && s.rate_dps<=37.30f &&
+      s.wheel_rpm>=362.f && s.wheel_rpm<=603.21f &&
       s.battery_mv>=7000.f && s.battery_mv<=8120.f &&
-      s.previous_peak_deg>=4.3006f && s.previous_peak_deg<=6.11884f;
+      s.previous_peak_deg>=4.3006f && s.previous_peak_deg<=6.90f;
 }
 inline float coastMj(float rate_dps) {
   return .09046158f+.00018973f*rate_dps*rate_dps;
@@ -26,21 +26,25 @@ class Feedback {
     float sum=0.f;for(unsigned i=0;i<count_;++i)sum+=residual_[i];
     return std::fmax(-.10f,std::fmin(.10f,sum/count_));
   }
-  // Two matched coast arrivals must be observed before first excitation.
-  // The first transferred-gain test is capped at 25ms. No automatic increase
-  // until negative-side powered response has actually been measured.
-  uint16_t capMs() const { return count_>=2 && !overshot_ ? 25 : 0; }
-  bool observe(float actual_mj,float raw_mj,float target_mj) {
+  // Two matched coast arrivals first. Raise the cap only after two completed
+  // matching powered arrivals below target at the current cap.
+  uint16_t capMs() const { return count_>=2 && !overshot_ ? cap_ms_ : 0; }
+  bool observe(float actual_mj,float raw_mj,float target_mj,uint16_t width_ms=0) {
     if(!std::isfinite(actual_mj)||!std::isfinite(raw_mj)||
        !std::isfinite(target_mj)||actual_mj<0.f||raw_mj<0.f||target_mj<=0.f) return false;
     overshot_=actual_mj>=target_mj;
-    if(std::fabs(actual_mj-raw_mj)>.15f) return false;
+    if(overshot_) { cap_ms_=cap_ms_>25 ? cap_ms_-5 : 25; limited_count_=0; }
+    if(std::fabs(actual_mj-raw_mj)>.15f) { limited_count_=0; return false; }
+    if(width_ms>0 && width_ms>=cap_ms_ && actual_mj<target_mj-.03f) {
+      if(++limited_count_>=2) { if(cap_ms_<40)cap_ms_+=5;limited_count_=0; }
+    } else if(width_ms>0) limited_count_=0;
     residual_[next_]=actual_mj-raw_mj;next_=(next_+1)%3;
     if(count_<3)++count_;
     return true;
   }
  private:
-  float residual_[3]={};unsigned count_=0,next_=0;bool overshot_=false;
+  float residual_[3]={};unsigned count_=0,next_=0,limited_count_=0;
+  uint16_t cap_ms_=25;bool overshot_=false;
 };
 __attribute__((noinline)) inline wheel_work_energy_control::Choice choose(
     const lateral_energy::Geometry& g,const wheel_work_energy_control::State& s,

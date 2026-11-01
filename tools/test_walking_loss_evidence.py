@@ -38,3 +38,14 @@ assert all(24.7827<=v['rate_dps']<=36.875 and 446.5<=v['rpm']<=603.21 and 4.3006
 text=''.join(' '.join(str(x[k]) for k in ('rate_dps','rpm','vbat_mv','previous_deg','peak_deg'))+'\n' for x in third)
 subprocess.run([sys.argv[1],'third'],input=text,text=True,check=True)
 print('Third run: 31 independent unpowered arrivals and expanded bounds PASS')
+
+fourth=json.loads(Path('tools/fixtures/walking_42306015.json').read_text())['records']
+unpowered=[v for v in fourth if v['pulse_ms']==0 and not v['output']]
+powered=[v for v in fourth if v['pulse_ms']==25 and v['output']]
+assert len(unpowered)==18 and len(powered)==13
+errors=[.09046158+.00018973*v['rate_dps']**2-potential(v['peak_deg']) for v in unpowered]
+assert (sum(e*e for e in errors)/len(errors))**.5 < .043
+assert all(18.45<=v['rate_dps']<=37.30 and 362<=v['rpm']<=603.21 and 4.3006<=v['previous_deg']<=6.90 for v in unpowered+powered)
+text=''.join(' '.join(str(x[k]) for k in ('rate_dps','rpm','vbat_mv','previous_deg','peak_deg'))+'\n' for x in unpowered)
+subprocess.run([sys.argv[1],'fourth'],input=text,text=True,check=True)
+print('Fourth run: 18 unpowered replay, 13 powered observations and expanded bounds PASS')

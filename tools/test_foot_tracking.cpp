@@ -5,6 +5,7 @@
 #include <cstring>
 #include "host_v46o/Arduino.h"
 #include "../src/foot_zero.h"
+#include "../src/foot_calibration_table.h"
 #include "../src/white_marker_tracker.h"
 #include "../src/foot_angle_estimator.h"
 #include "../src/marker_identity_policy.h"
@@ -164,10 +165,10 @@ static void weakDisplacedConfirmation(){
   std::cout<<"Weak displaced candidate confirmation, immediate true-track return, strong motion and dim tracking PASS\n";
 }
 static void fixedPoseCalibrationReplay(){
-  // Independently measured IMU-reference pairs, including all intermediate poses.
+  // IMU-reference intermediate poses and averaged repeat endpoint.
   const float rows[][3]={{203.0819f,201.6569f,0},
     {182.4695f,173.8169f,3.688465f},{152.5749f,144.3562f,8.371281f},
-    {111.0505f,102.703f,14.109958f},{67.8096f,62.8279f,20.678285f}};
+    {111.0505f,102.703f,14.109958f},{67.5192f,63.6918f,20.626501f}};
   for(int side=0;side<2;++side){
     WhiteMarkerObservation marker;marker.valid=true;marker.id=side;
     const float zero=rows[0][side];
@@ -187,6 +188,17 @@ static void fixedPoseCalibrationReplay(){
     marker.center_x_px=zero;assert(!estimateFootAngle(marker,NAN,true).valid);
     marker.valid=false;assert(!estimateFootAngle(marker,zero,true).valid);
   }
+  // The repeat pair is treated as the same fixed-leg camera-tilt protocol.
+  // Measure change relative to its own upright capture, not another boot's zero.
+  const float upright[]={203.0717f,201.2023f};
+  const float tilted[]={67.2186f,64.1011f};
+  float delta[2];
+  for(int side=0;side<2;++side){
+    const auto* points=side==0?foot_calibration::right:foot_calibration::left;
+    delta[side]=foot_calibration::angleAt(points,tilted[side])-foot_calibration::angleAt(points,upright[side]);
+    assert(std::abs(delta[side]-20.574717f)<.13f);
+  }
+  assert(std::abs(delta[0]-delta[1])<.20f);
   std::cout<<"Five-pose interpolation, endpoint extrapolation, zero and invalid observations PASS\n";
 }
 int main(){verticalRecovery();wrongZeroReproduction();identityAndAmbiguity();zeroGates();weakDisplacedConfirmation();fixedPoseCalibrationReplay();}

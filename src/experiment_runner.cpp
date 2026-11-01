@@ -3156,7 +3156,7 @@ void ExperimentRunner::observeWheelWorkPeak(
   bool learn=false;
   if(work_walking_pending_ && work_negative_pending_ && event.physical_peak_side<0) {
     raw=(energy_control_autonomous_pending_model_energy_j_-work_negative_pending_bias_j_)*1000.f;
-    walking_loss_feedback_.observe(event.measured_energy_j*1000.f,raw,event.target_energy_j*1000.f);
+    walking_loss_feedback_.observe(event.measured_energy_j*1000.f,raw,event.target_energy_j*1000.f,work_negative_pending_width_ms_);
     adaptive_cg_.breakPair();
     return; // Separate measured walking branch: no historical bias/CG learning.
   }
