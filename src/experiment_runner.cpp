@@ -2848,14 +2848,15 @@ void ExperimentRunner::updateEnergyControlAutonomousPulse(uint32_t now_ms) {
     // were completed by the bounded fast selector at the accepted zero crossing.
   }
 }
-void ExperimentRunner::observeFootFrame(uint16_t run_id,uint32_t frame_ms,bool left_valid,bool right_valid,float left_deg,float right_deg,float left_px,float right_px) {
+void ExperimentRunner::observeFootFrame(uint16_t run_id,uint32_t frame_ms,bool left_valid,bool right_valid,float left_deg,float right_deg,float left_px,float right_px,
+                                        bool left_in_range,bool right_in_range) {
   foot_frame_run_id_=run_id;foot_frame_ms_=frame_ms;
   foot_frame_left_valid_=left_valid;foot_frame_right_valid_=right_valid;
   foot_frame_left_=left_deg;foot_frame_right_=right_deg;
   foot_balance_.frame(run_id,frame_ms,left_valid,right_valid,left_deg,right_deg);
   foot_energy_.frame(run_id,frame_ms,left_valid && std::isfinite(left_px),right_valid && std::isfinite(right_px),left_px,right_px);
   if(wheelWorkMode() && energy_control_autonomous_target_peak_deg_==8.f) {
-    foot_phase_observer_.frame(run_id,frame_ms,left_valid,right_valid,left_deg,right_deg);
+    foot_phase_observer_.calibratedFrame(run_id,frame_ms,left_valid,right_valid,left_in_range,right_in_range,left_deg,right_deg);
     processFootPhaseCycle(frame_ms);
   }
 }

@@ -61,8 +61,10 @@ def events_for(h, m, extra_delay, poll_delay):
         if exposed < 0 or frame_us < 0 or delivered_us < frame_us or processing < 0:
             continue
         delivered = exposed + (delivered_us - frame_us) + processing + poll_delay*1000
-        lv = bool(f.get('frame_valid') and f.get('zero_ready') and f.get('left_valid'))
-        rv = bool(f.get('frame_valid') and f.get('zero_ready') and f.get('right_valid'))
+        # Mirror live phase-control gating: never treat an extrapolated camera
+        # angle as calibrated. Missing range flags fail closed for older logs.
+        lv = bool(f.get('frame_valid') and f.get('zero_ready') and f.get('left_valid') and f.get('left_in_range'))
+        rv = bool(f.get('frame_valid') and f.get('zero_ready') and f.get('right_valid') and f.get('right_in_range'))
         left, right = number(f.get('left_deg')), number(f.get('right_deg'))
         if not isinstance(f.get('left_deg'), (int, float)): lv = False
         if not isinstance(f.get('right_deg'), (int, float)): rv = False

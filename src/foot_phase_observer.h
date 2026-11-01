@@ -12,6 +12,13 @@ class Observer {
  public:
   void reset(uint16_t id) { *this = Observer{}; run_id_=id; }
 
+  // Only the phase controller needs strict calibration support. Keep raw
+  // detections and extrapolated diagnostic values available to other users.
+  bool calibratedFrame(uint16_t id, uint32_t ms, bool lv, bool rv,
+                       bool left_in_range, bool right_in_range, float left, float right) {
+    return frame(id,ms,lv && left_in_range,rv && right_in_range,left,right);
+  }
+
   // Camera frame timestamps must be strictly increasing. Their precise
   // relationship to sensor exposure is not independently validated.
   // Missing/invalid frames

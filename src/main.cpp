@@ -199,7 +199,8 @@ static bool controlStep(void*) {
       runner.observeFootFrame(f.run_id,static_cast<uint32_t>((f.frame_us-measurement_epoch_us)/1000),
           f.left_valid,f.right_valid,f.left_deg,f.right_deg,
           (f.zero_ready && f.frame_valid && f.left_valid) ? fs.left_zero-f.left_x : NAN,
-          (f.zero_ready && f.frame_valid && f.right_valid) ? fs.right_zero-f.right_x : NAN);
+          (f.zero_ready && f.frame_valid && f.right_valid) ? fs.right_zero-f.right_x : NAN,
+          f.left_in_range,f.right_in_range);
     }
   }
   runner.update();

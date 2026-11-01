@@ -50,6 +50,7 @@ class Controller {
     if((state_==State::Trial || state_==State::Hold) && e<-.30f) {stop(Reason::Reversed);return;}
     err_[next_]=e;peak_[next_]=negative_peak;left_[next_]=left;right_[next_]=right;
     neg_output_[next_]=negative_executed;targets_[next_]=cycle_actual->target_mj;
+    widths_[next_]=cycle_actual->width;
     next_=(next_+1)%2;if(count_<2)++count_;
     if((state_!=State::Trial && state_!=State::Hold) || !trial_started_ || start<=trial_start_)return;
     if(negative_peak<reference_peak_-.8f) {stop(Reason::WeakPeak);return;}
@@ -118,6 +119,7 @@ class Controller {
          err_[0]<=.30f||err_[1]<=.30f||!neg_output_[0]||!neg_output_[1]||
          peak_[1-next_]<peak_[next_]-.30f||!actual_valid_||actual_ma_!=400||actual_sign_!=1||
          now<actual_ms_||now-actual_ms_>1500||actual_width_!=baseline_ms ||
+         widths_[0]!=baseline_ms||widths_[1]!=baseline_ms||
          !std::isfinite(targets_[0])||!std::isfinite(targets_[1])||
          std::fabs(targets_[0]-target_mj)>.001f||std::fabs(targets_[1]-target_mj)>.001f)return safe;
       anchor_width_=baseline_ms;last_width_=actual_width_;reference_target_mj_=target_mj;startTrial();
@@ -214,6 +216,7 @@ class Controller {
   Actual history_[kHistory];unsigned actual_next_=0,actual_count_=0;
   uint32_t last_pair_=0,trial_start_=0,actual_ms_=0;unsigned next_=0,count_=0,trial_count_=0,weak_count_=0;
   uint16_t anchor_width_=0,last_width_=0,desired_width_=0,requested_=0,restore_target_=0,actual_width_=0;
+  uint16_t widths_[2]={};
   int16_t actual_ma_=0;int actual_sign_=0;
   bool neg_output_[2]={},had_negative_=false,previous_negative_output_=false,trial_started_=false;
   bool waiting_confirmation_=false,actual_valid_=false,require_neutral_=false;

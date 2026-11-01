@@ -92,5 +92,24 @@ int main() {
   assert(o.peak(14,1,2740));
   assert(o.frame(14,2850,false,false,0,0));
   assert(o.count()==0 && !o.valid(2850));
+  
+  // A detected marker may have a finite extrapolated angle while outside the
+  // measured calibration support. Such frames must never qualify a peak.
+  o.reset(15);
+  assert(o.peak(15,-1,1000));
+  assert(o.calibratedFrame(15,1010,true,true,false,true,1,2));
+  assert(o.calibratedFrame(15,1110,false,false,true,true,0,0));
+  assert(o.peak(15,1,1400));
+  assert(o.calibratedFrame(15,1410,true,true,true,false,4,1));
+  assert(o.calibratedFrame(15,1510,false,false,true,true,0,0));
+  assert(o.peak(15,-1,1800));
+  assert(o.calibratedFrame(15,1810,true,true,true,true,1,2));
+  assert(o.calibratedFrame(15,1910,false,false,true,true,0,0));
+  assert(o.count()==0 && !o.valid(1910));
+  // Detection validity remains required even when both coordinates are in range.
+  assert(o.peak(15,1,2200));
+  assert(o.calibratedFrame(15,2210,false,true,true,true,4,1));
+  assert(o.calibratedFrame(15,2310,false,false,true,true,0,0));
+  assert(o.count()==0 && !o.valid(2310));
   std::cout << "foot phase observer: nearest frame, run timebase, signed motion and incomplete-cycle guards PASS\n";
 }

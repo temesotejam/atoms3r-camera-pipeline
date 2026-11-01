@@ -98,6 +98,23 @@ int main(){
   Controller differing;baseline(differing,900);pair(differing,1000);
   assert(limit(differing,1700,80,.42f)==80);confirm(differing,1700,80);pair(differing,1800);
   assert(limit(differing,1850,80,.42f)==80);
+  // Two baseline cycles must both contain the same actual pulse width as the
+  // current unmodified candidate. A prior 75 ms pulse cannot be pooled with
+  // a recent 80 ms pulse; one additional 80 ms cycle makes it eligible.
+  Controller differing_width;
+  assert(differing_width.limit(900,75,400,1,75,true,.4f)==75);
+  confirm(differing_width,900,75);pair(differing_width,1000);
+  baseline(differing_width,1700);pair(differing_width,1800);
+  assert(limit(differing_width,1850)==80 && differing_width.state()==State::Waiting);
+  baseline(differing_width,2500);pair(differing_width,2600);
+  assert(limit(differing_width,2650)==75 && differing_width.state()==State::Trial);
+  // The reverse order is blocked as well, even though the latest actual
+  // pulse matches the new ordinary candidate.
+  Controller differing_width_reverse;baseline(differing_width_reverse,900);pair(differing_width_reverse,1000);
+  assert(differing_width_reverse.limit(1700,75,400,1,75,true,.4f)==75);
+  confirm(differing_width_reverse,1700,75);pair(differing_width_reverse,1800);
+  assert(differing_width_reverse.limit(1850,75,400,1,75,true,.4f)==75 &&
+         differing_width_reverse.state()==State::Waiting);
   // A stale pulse from a previous cycle cannot qualify a fresh baseline pair.
   Controller repeated;baseline(repeated,900);pair(repeated,1000);pair(repeated,1800);
   assert(limit(repeated,1850)==80);
