@@ -2,6 +2,7 @@
 #include <cmath>
 #include <cstdint>
 #include "foot_tracking_config.h"
+#include "foot_calibration_table.h"
 
 // Calibrated camera-relative angles, NOT ground step distance. Positive body
 // peak is paired with the left foot and negative with the right. This is the
@@ -20,19 +21,25 @@ class Observer {
     return frame(id,ms,lv && left_in_range,rv && right_in_range,left,right);
   }
 
-  // Only phase control may use a small bounded endpoint extrapolation; the
-  // normal logged in_range flags and angle calibration remain unchanged.
-  static bool boundedMarker(bool valid, bool zero_ready, float x, float angle,
-                            float minimum, float maximum) {
+  // Phase-only fixed-reference angle. Unlike UI foot angles, this never uses
+  // the per-boot zero, so a late zero lock cannot step the control signal.
+  // Endpoint extrapolation remains limited to 2px of measured support.
+  static bool boundedMarker(bool detected, float x, float minimum, float maximum) {
     constexpr float margin=2.f;
-    return valid && zero_ready && std::isfinite(x) && std::isfinite(angle) &&
+    return detected && std::isfinite(x) &&
            x>=minimum-margin && x<=maximum+margin;
   }
-  bool boundedFrame(uint16_t id,uint32_t ms,bool lv,bool rv,bool zero_ready,
-                    float left_x,float right_x,float left,float right) {
+  static float fixedAngle(const foot_calibration::Point* points,float x,float fixed_x) {
+    return foot_calibration::angleAt(points,x)-foot_calibration::angleAt(points,fixed_x);
+  }
+  bool rawFrame(uint16_t id,uint32_t ms,bool left_detected,bool right_detected,
+                float left_x,float right_x) {
+    const bool lv=boundedMarker(left_detected,left_x,appcfg::kFootAngleBMinCalXPx,appcfg::kFootAngleBMaxCalXPx);
+    const bool rv=boundedMarker(right_detected,right_x,appcfg::kFootAngleAMinCalXPx,appcfg::kFootAngleAMaxCalXPx);
+    const float left=lv ? fixedAngle(foot_calibration::left,left_x,appcfg::kFootAngleBZeroXPx) : NAN;
+    const float right=rv ? fixedAngle(foot_calibration::right,right_x,appcfg::kFootAngleAZeroXPx) : NAN;
     return frame(id,ms,
-        boundedMarker(lv,zero_ready,left_x,left,appcfg::kFootAngleBMinCalXPx,appcfg::kFootAngleBMaxCalXPx),
-        boundedMarker(rv,zero_ready,right_x,right,appcfg::kFootAngleAMinCalXPx,appcfg::kFootAngleAMaxCalXPx),left,right);
+        lv,rv,left,right);
   }
 
   // Camera frame timestamps must be strictly increasing. Their precise

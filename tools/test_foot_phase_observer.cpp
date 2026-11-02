@@ -112,35 +112,41 @@ int main() {
   assert(o.calibratedFrame(15,2310,false,false,true,true,0,0));
   assert(o.count()==0 && !o.valid(2310));
   // The phase-only exception is precisely bounded in raw pixels and never
-  // accepts a nonfinite value, missing detection or unready zero.
+  // accepts a nonfinite value or missing marker detection.
   const float lmin=appcfg::kFootAngleBMinCalXPx, lmax=appcfg::kFootAngleBMaxCalXPx;
   const float rmin=appcfg::kFootAngleAMinCalXPx, rmax=appcfg::kFootAngleAMaxCalXPx;
   auto ok=Observer::boundedMarker;
-  assert(ok(true,true,lmin-2.f,1,lmin,lmax));
-  assert(ok(true,true,lmax+2.f,1,lmin,lmax));
-  assert(!ok(true,true,lmin-3.f,1,lmin,lmax));
-  assert(!ok(true,true,lmax+3.f,1,lmin,lmax));
-  assert(!ok(true,true,NAN,1,lmin,lmax));
-  assert(!ok(true,true,lmax,NAN,lmin,lmax));
-  assert(!ok(false,true,lmax,1,lmin,lmax));
-  assert(!ok(true,false,lmax,1,lmin,lmax));
-  assert(ok(true,true,rmax+2.f,1,rmin,rmax));
-  assert(!ok(true,true,rmax+3.f,1,rmin,rmax));
+  assert(ok(true,lmin-2.f,lmin,lmax));
+  assert(ok(true,lmax+2.f,lmin,lmax));
+  assert(!ok(true,lmin-3.f,lmin,lmax));
+  assert(!ok(true,lmax+3.f,lmin,lmax));
+  assert(!ok(true,NAN,lmin,lmax));
+  assert(!ok(false,lmax,lmin,lmax));
+  assert(ok(true,rmax+2.f,rmin,rmax));
+  assert(!ok(true,rmax+3.f,rmin,rmax));
   o.reset(16);
-  auto boundedCapture=[&](int side,unsigned ms,float l,float r,float lx,float rx,bool zr) {
+  auto rawCapture=[&](int side,unsigned ms,float lx,float rx,bool detected=true) {
     assert(o.peak(16,side,ms));
-    assert(o.boundedFrame(16,ms+10,true,true,zr,lx,rx,l,r));
-    assert(o.boundedFrame(16,ms+110,false,false,zr,lx,rx,0,0));
+    assert(o.rawFrame(16,ms+10,detected,detected,lx,rx));
+    assert(o.rawFrame(16,ms+110,false,false,lx,rx));
   };
-  boundedCapture(-1,1000,1,2,lmax+1.f,rmax+1.f,true);
-  boundedCapture(1,1400,4,1,lmax+1.f,rmax+1.f,true);
-  boundedCapture(-1,1800,1,2,lmax+1.f,rmax+1.f,true);
-  boundedCapture(1,2200,4,1,lmax+1.f,rmax+1.f,true);
-  boundedCapture(-1,2600,1,2,lmax+1.f,rmax+1.f,true);
+  rawCapture(-1,1000,195,198);rawCapture(1,1400,170,202);
+  rawCapture(-1,1800,195,198);rawCapture(1,2200,170,202);
+  rawCapture(-1,2600,195,198);
   assert(o.valid(2710));
-  boundedCapture(1,3000,4,1,lmax+1.f,rmax+3.f,true);
+  const float l_expected=foot_calibration::angleAt(foot_calibration::left,170)-foot_calibration::angleAt(foot_calibration::left,195);
+  const float r_expected=foot_calibration::angleAt(foot_calibration::right,198)-foot_calibration::angleAt(foot_calibration::right,202);
+  assert(close(o.leftLatest(),l_expected) && close(o.rightLatest(),r_expected));
+  // Crossing calibration table segments is nonlinear. Any fixed reference
+  // cancels exactly in the phase differences, including if the UI zero locks.
+  for(float ref: {150.f,201.f}) {
+    const float calc=Observer::fixedAngle(foot_calibration::left,170,ref)-Observer::fixedAngle(foot_calibration::left,195,ref);
+    assert(close(calc,l_expected));
+  }
+  assert(!close(l_expected,25.f*appcfg::kFootAngleBDegPerPx));
+  rawCapture(1,3000,lmax+1.f,rmax+3.f);
   assert(!o.valid(3110));
-  boundedCapture(-1,3400,1,2,lmax,rmax,false);
+  rawCapture(-1,3400,lmax,rmax,false);
   assert(!o.valid(3510));
   std::cout << "foot phase observer: nearest frame, run timebase, signed motion and incomplete-cycle guards PASS\n";
 }

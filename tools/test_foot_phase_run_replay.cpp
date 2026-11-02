@@ -14,9 +14,9 @@ int main() {
   while(std::cin>>op) {
     if(op=='R') {std::cin>>run;observer.reset(static_cast<uint16_t>(run));sequence=0;continue;}
     if(op=='B') {
-      int lv,rv,zero;float left_x,right_x,left,right;
-      if(!(std::cin>>now>>ms>>lv>>rv>>zero>>left_x>>right_x>>left>>right))return 1;
-      observer.boundedFrame(static_cast<uint16_t>(run),ms,lv,rv,zero,left_x,right_x,left,right);
+      int lv,rv;float left_x,right_x;
+      if(!(std::cin>>now>>ms>>lv>>rv>>left_x>>right_x))return 1;
+      observer.rawFrame(static_cast<uint16_t>(run),ms,lv,rv,left_x,right_x);
     } else if(op=='P') {
       int side;if(!(std::cin>>now>>ms>>side))return 1;
       observer.peak(static_cast<uint16_t>(run),side,ms);

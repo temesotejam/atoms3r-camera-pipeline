@@ -200,7 +200,8 @@ static bool controlStep(void*) {
           f.left_valid,f.right_valid,f.left_deg,f.right_deg,
           (f.zero_ready && f.frame_valid && f.left_valid) ? fs.left_zero-f.left_x : NAN,
           (f.zero_ready && f.frame_valid && f.right_valid) ? fs.right_zero-f.right_x : NAN,
-          f.frame_valid,f.zero_ready,f.left_x,f.right_x);
+          f.frame_valid && f.state_id==3 && f.left_reason==MarkerDetectionReason::Detected,
+          f.frame_valid && f.state_id==3 && f.right_reason==MarkerDetectionReason::Detected,f.left_x,f.right_x);
     }
   }
   runner.update();
