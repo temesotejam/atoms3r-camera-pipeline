@@ -52,8 +52,24 @@ def expand_tables(value):
             fields, rows = value['fields'], value['rows']
             if len(set(fields)) != len(fields) or any(len(row) != len(fields) for row in rows):
                 raise ValueError('Invalid compact table')
-            return [dict(zip(fields, map(expand_tables, row))) for row in rows]
-        return {key: expand_tables(item) for key, item in value.items()}
+            return [expand_tables(dict(zip(fields, row))) for row in rows]
+        result = {key: expand_tables(item) for key, item in value.items()}
+        if 'foot_span_flags' in result:
+            mask = result['foot_span_flags']
+            if type(mask) is not int or mask < 0 or mask >= (1 << 12):
+                raise ValueError('Invalid foot span flag mask')
+            names = ('valid','selected','startup','left_low','right_low','left_both',
+                     'right_both','continuous','left_outlier','right_outlier',
+                     'left_edge_unverified','right_edge_unverified')
+            for bit, name in enumerate(names):
+                result['foot_span_' + name] = bool(mask & (1 << bit))
+            # New records omit legacy phase; provide nullable keys for older
+            # consumers without implying the measurements were recorded.
+            for name in ('left_deg','right_deg','start_ms','end_ms','baseline_ms','requested_ms','state','reason'):
+                result.setdefault('foot_phase_' + name, None)
+            result.setdefault('foot_phase_valid', False)
+            result.setdefault('foot_phase_selected', False)
+        return result
     if isinstance(value, list):
         return [expand_tables(item) for item in value]
     return value
@@ -1132,6 +1148,12 @@ ENERGY_CONTROL_AUTONOMOUS_ZERO_CROSS_COLUMNS = [
     "work_prediction_cross_condition", "work_brake_cap_ms", "work_bias_samples", "work_model_weight",
     "predicted_wheel_work_j", "predicted_input_work_j",
     "predicted_post_input_work_j", "predicted_work_change_j",
+    "foot_span_left_deg", "foot_span_right_deg", "foot_span_trimmed_left_deg", "foot_span_trimmed_right_deg",
+    "foot_span_start_ms", "foot_span_end_ms", "foot_span_baseline_ms", "foot_span_requested_ms",
+    "foot_span_state", "foot_span_accepted_cycles", "foot_span_valid", "foot_span_selected",
+    "foot_span_startup", "foot_span_left_low", "foot_span_right_low", "foot_span_left_both",
+    "foot_span_right_both", "foot_span_continuous", "foot_span_left_outlier", "foot_span_right_outlier",
+    "foot_span_left_edge_unverified", "foot_span_right_edge_unverified",
 ]
 
 

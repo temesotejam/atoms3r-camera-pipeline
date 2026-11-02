@@ -3513,7 +3513,7 @@ bool ExperimentRunner::selectFootPhaseOutput(
         work_choice=candidate;selected_current_mA=candidate.current_ma;
         selected_current_table=candidate.current_ma==350 ? &positive_current_probe_tables_[0] :
             candidate.current_ma==400 ? &positive_current_probe_tables_[1] : &lateral_current_table_;
-        event.foot_span_selected=true;
+        event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_selected, true);
       }
     }
   }
@@ -3609,28 +3609,22 @@ void ExperimentRunner::finishFootEnergyDecision(PsramLogger::EnergyControlAutono
       foot_span_control_.confirm(t_ms,event.output_executed,event.command_current_mA,
           event.q_command_direction,event.pulse_width_ms);
     }
-    // Original signed-phase observation remains in the record for backwards
-    // comparison, but its former motor-output controller is inactive.
-    event.foot_phase_state=0;event.foot_phase_reason=0;
-    event.foot_phase_start_ms=foot_phase_observer_.cycleStart();
-    event.foot_phase_end_ms=foot_phase_observer_.cycleTime();
-    event.foot_phase_left_deg=foot_phase_observer_.leftLatest();
-    event.foot_phase_right_deg=foot_phase_observer_.rightLatest();
-    event.foot_phase_valid=foot_phase_observer_.valid(t_ms);
+    // Legacy signed-phase event fields are no longer persisted; raw foot
+    // frames and body peak records remain available for offline reconstruction.
     const auto& span=foot_span_observer_.latest();
     event.foot_span_left_deg=span.left.span;event.foot_span_right_deg=span.right.span;
     event.foot_span_trimmed_left_deg=span.left.trimmed_span;event.foot_span_trimmed_right_deg=span.right.trimmed_span;
     event.foot_span_start_ms=span.start_ms;event.foot_span_end_ms=span.end_ms;
     event.foot_span_state=static_cast<uint8_t>(foot_span_control_.state());
     event.foot_span_accepted_cycles=static_cast<uint8_t>(foot_span_control_.acceptedProbeCycles());
-    event.foot_span_startup=span.startup;event.foot_span_continuous=span.continuous;
-    event.foot_span_left_low=span.left.low_signal;event.foot_span_right_low=span.right.low_signal;
-    event.foot_span_left_outlier=span.left.single_outlier;event.foot_span_right_outlier=span.right.single_outlier;
-    event.foot_span_left_edge_unverified=span.left.edge_unverified;event.foot_span_right_edge_unverified=span.right.edge_unverified;
-    event.foot_span_left_both=span.left.both_directions;event.foot_span_right_both=span.right.both_directions;
-    event.foot_span_valid=span.valid && span.continuous && !span.left.single_outlier && !span.right.single_outlier &&
+    event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_startup, span.startup);event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_continuous, span.continuous);
+    event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_left_low, span.left.low_signal);event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_right_low, span.right.low_signal);
+    event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_left_outlier, span.left.single_outlier);event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_right_outlier, span.right.single_outlier);
+    event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_left_edge_unverified, span.left.edge_unverified);event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_right_edge_unverified, span.right.edge_unverified);
+    event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_left_both, span.left.both_directions);event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_right_both, span.right.both_directions);
+    event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_valid, span.valid && span.continuous && !span.left.single_outlier && !span.right.single_outlier &&
         !span.left.edge_unverified && !span.right.edge_unverified &&
-        (span.left.both_directions || span.left.low_signal) && (span.right.both_directions || span.right.low_signal);
+        (span.left.both_directions || span.left.low_signal) && (span.right.both_directions || span.right.low_signal));
     const bool supported=event.valid && event.output_executed && event.work_control_branch!=0 &&
       event.command_matches_zero_cross_motion && !event.q_saturated_upper && !event.q_saturated_lower &&
       !event.energy_model_extrapolated && peak_error_adaptation::speedUsable(event.pre_input_wheel_speed_rpm,

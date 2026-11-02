@@ -304,11 +304,16 @@ for work_first, suffix in ((False, '.fallback-first.rwlog'), (True, '.work-first
             assert event['low_peak_selected'] is True and event['low_peak_base_width_ms']==80
             assert abs(event['low_peak_base_prediction_mj']-.281)<.00001
             assert abs(event['low_peak_applied_bias_mj']-.08)<.00001
-            assert abs(event['foot_phase_left_deg']-2.1)<.00001 and abs(event['foot_phase_right_deg']+.2)<.00001
-            assert event['foot_phase_start_ms']==1000 and event['foot_phase_end_ms']==1800
-            assert event['foot_phase_baseline_ms']==80 and event['foot_phase_requested_ms']==75
-            assert event['foot_phase_state']==1 and event['foot_phase_reason']==0
-            assert event['foot_phase_valid'] and event['foot_phase_selected']
+            for key in ('foot_phase_left_deg','foot_phase_right_deg','foot_phase_start_ms','foot_phase_end_ms',
+                        'foot_phase_baseline_ms','foot_phase_requested_ms','foot_phase_state','foot_phase_reason'):
+                assert event[key] is None
+            assert event['foot_phase_valid'] is False and event['foot_phase_selected'] is False
+            for key,value in (('foot_span_left_deg',2.12345),('foot_span_right_deg',.23456),
+                              ('foot_span_trimmed_left_deg',2.01234),('foot_span_trimmed_right_deg',.12345)):
+                assert abs(event[key]-value)<.00001
+            assert event['foot_span_start_ms']==1000 and event['foot_span_end_ms']==1800
+            assert event['foot_span_baseline_ms']==80 and event['foot_span_requested_ms']==75
+            assert event['foot_span_state']==4 and event['foot_span_accepted_cycles']==2
             assert abs(event['target_energy_j']-.00076)<.000001
             assert work_metadata['walking_energy_loss']['independent_validation'] is False
             assert work_metadata['walking_energy_loss']['low_rpm_coast_observations']==26
@@ -325,7 +330,18 @@ for work_first, suffix in ((False, '.fallback-first.rwlog'), (True, '.work-first
         with (Path(tmp) / 'csv' / 'energy_control_autonomous_zero_cross_events.csv').open() as stream:
             exported = list(csv.DictReader(stream))
         assert len(exported) == 256
-        for row, event in zip(exported, work_rows):
+        flags=('valid','selected','startup','left_low','right_low','left_both','right_both','continuous',
+               'left_outlier','right_outlier','left_edge_unverified','right_edge_unverified')
+        for index,(row,event) in enumerate(zip(exported,work_rows)):
+            for j,flag in enumerate(flags):
+                key='foot_span_'+flag
+                assert event[key] is bool(index & (1 << (j % 8)))
+                assert row[key] == str(event[key])
+            if index==255:
+                for key in ('foot_span_left_deg','foot_span_right_deg','foot_span_trimmed_left_deg','foot_span_trimmed_right_deg'):
+                    assert abs(float(row[key])-event[key])<.00001
+                for key in ('foot_span_start_ms','foot_span_end_ms','foot_span_baseline_ms','foot_span_requested_ms','foot_span_state','foot_span_accepted_cycles'):
+                    assert row[key]==str(event[key])
             for key in ('work_control_branch', 'work_brake_cap_ms', 'work_bias_samples', 'cg_shift_mm', 'work_model_weight'):
                 assert row[key] == str(event[key])
             assert row['work_prediction_cross_condition'] == str(event['work_prediction_cross_condition'])

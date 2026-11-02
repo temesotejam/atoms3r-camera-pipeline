@@ -372,16 +372,30 @@ class PsramLogger {
     bool foot_energy_valid=false;uint8_t foot_energy_phase=0,foot_energy_reason=0;
     float low_peak_bias_mj=NAN,low_peak_base_prediction_mj=NAN,low_peak_applied_bias_mj=NAN;
     uint16_t low_peak_base_width_ms=0;bool low_peak_active=false,low_peak_selected=false;
-    float foot_phase_left_deg=NAN,foot_phase_right_deg=NAN;
-    uint32_t foot_phase_start_ms=0,foot_phase_end_ms=0;
-    uint16_t foot_phase_baseline_ms=0,foot_phase_requested_ms=0;
-    uint8_t foot_phase_state=0,foot_phase_reason=0;
-    bool foot_phase_valid=false,foot_phase_selected=false;
     float foot_span_left_deg=NAN,foot_span_right_deg=NAN,foot_span_trimmed_left_deg=NAN,foot_span_trimmed_right_deg=NAN;
     uint32_t foot_span_start_ms=0,foot_span_end_ms=0;
     uint16_t foot_span_baseline_ms=0,foot_span_requested_ms=0;
     uint8_t foot_span_state=0,foot_span_accepted_cycles=0;
-    bool foot_span_valid=false,foot_span_selected=false,foot_span_startup=false,foot_span_left_low=false,foot_span_right_low=false,foot_span_left_both=false,foot_span_right_both=false,foot_span_continuous=false,foot_span_left_outlier=false,foot_span_right_outlier=false,foot_span_left_edge_unverified=false,foot_span_right_edge_unverified=false;
+    enum FootSpanFlag : uint16_t {
+      Span_valid=uint16_t(1u<<0),
+      Span_selected=uint16_t(1u<<1),
+      Span_startup=uint16_t(1u<<2),
+      Span_left_low=uint16_t(1u<<3),
+      Span_right_low=uint16_t(1u<<4),
+      Span_left_both=uint16_t(1u<<5),
+      Span_right_both=uint16_t(1u<<6),
+      Span_continuous=uint16_t(1u<<7),
+      Span_left_outlier=uint16_t(1u<<8),
+      Span_right_outlier=uint16_t(1u<<9),
+      Span_left_edge_unverified=uint16_t(1u<<10),
+      Span_right_edge_unverified=uint16_t(1u<<11),
+    };
+    uint16_t foot_span_flags=0;
+    void setFootSpanFlag(FootSpanFlag flag,bool value) {
+      if(value) foot_span_flags |= static_cast<uint16_t>(flag);
+      else foot_span_flags &= static_cast<uint16_t>(~static_cast<uint16_t>(flag));
+    }
+    bool footSpanFlag(FootSpanFlag flag) const { return (foot_span_flags & static_cast<uint16_t>(flag))!=0; }
     float target_energy_j = NAN;
     float delta_energy_required_j = NAN;
     float kinetic_energy_j=NAN, predicted_loss_j=NAN, integral_energy_j=NAN;

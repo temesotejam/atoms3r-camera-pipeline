@@ -209,10 +209,26 @@ int main(int argc,char** argv){
         z.foot_balance_right_mean=.2f;z.target_energy_j=.00076f;
         z.foot_energy_bias=.08f;z.foot_energy_left_px=20.f;z.foot_energy_right_px=2.f;z.foot_energy_valid=true;z.foot_energy_phase=3;z.foot_energy_reason=4;z.low_peak_bias_mj=.08f;z.low_peak_active=true;
         z.low_peak_selected=true;z.low_peak_base_width_ms=80;z.low_peak_base_prediction_mj=.281f;z.low_peak_applied_bias_mj=.08f;
-        z.foot_phase_left_deg=2.1f;z.foot_phase_right_deg=-.2f;z.foot_phase_start_ms=1000;z.foot_phase_end_ms=1800;
-        z.foot_phase_baseline_ms=80;z.foot_phase_requested_ms=75;z.foot_phase_state=1;z.foot_phase_reason=0;
-        z.foot_phase_valid=true;z.foot_phase_selected=true;
+        z.foot_span_left_deg=2.12345f;z.foot_span_right_deg=.23456f;
+        z.foot_span_trimmed_left_deg=2.01234f;z.foot_span_trimmed_right_deg=.12345f;
+        z.foot_span_start_ms=1000;z.foot_span_end_ms=1800;
+        z.foot_span_baseline_ms=80;z.foot_span_requested_ms=75;z.foot_span_state=4;z.foot_span_accepted_cycles=2;
       }
+      // Each flag independently cycles on/off across the 256-event export.
+      using Flag=PsramLogger::EnergyControlAutonomousZeroCrossEvent;
+      const Flag::FootSpanFlag flags[]={Flag::Span_valid,Flag::Span_selected,Flag::Span_startup,
+        Flag::Span_left_low,Flag::Span_right_low,Flag::Span_left_both,Flag::Span_right_both,
+        Flag::Span_continuous,Flag::Span_left_outlier,Flag::Span_right_outlier,
+        Flag::Span_left_edge_unverified,Flag::Span_right_edge_unverified};
+      for(unsigned j=0;j<12;++j) {
+        z.setFootSpanFlag(flags[j], (i & (1u << (j % 8))) != 0);
+        assert(z.footSpanFlag(flags[j]) == ((i & (1u << (j % 8))) != 0));
+      }
+      // Clearing one bit must never modify the others.
+      const uint16_t saved=z.foot_span_flags;
+      z.setFootSpanFlag(Flag::Span_selected,false);
+      assert((z.foot_span_flags & ~uint16_t(Flag::Span_selected)) == (saved & ~uint16_t(Flag::Span_selected)));
+      z.setFootSpanFlag(Flag::Span_selected, (saved & Flag::Span_selected)!=0);
       work.addEnergyControlAutonomousZeroCrossEvent(z);
     }
     work.markMeasurementDone(); work.seal();
