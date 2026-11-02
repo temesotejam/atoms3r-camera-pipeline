@@ -37,7 +37,7 @@ struct FakeImu {bool good=true;bool acquisitionHealthy()const{return good;}bool 
 struct FakeRoller {bool good=true;bool ok()const{return good;}};
 struct FakeFoot {bool good=true;unsigned calls=0;bool selectorUnavailable(uint32_t){++calls;return good;}};
 struct FakeAdaptive {bool broken=false;void breakPair(){broken=true;}};
-struct Status {bool emergency_stop=false,pulse_active=false;ExperimentState state=ExperimentState::RUNNING_BATCH_SWEEP;};
+struct Status {bool emergency_stop=false,pulse_active=false;ExperimentState state=ExperimentState::RUNNING_BATCH_SWEEP;float current_audit_q_target_mA_s=0,current_audit_q_pred_mA_s=0;};
 class ExperimentRunner {
  public:
   Status status_;FakeImu imu_obj;FakeRoller roller_obj;FakeFoot foot_span_control_;FakeAdaptive adaptive_cg_;

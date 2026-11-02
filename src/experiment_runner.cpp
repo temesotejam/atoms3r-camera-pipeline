@@ -3721,6 +3721,7 @@ bool ExperimentRunner::tryPositiveLeftBoost(
   event.predicted_wheel_work_j=NAN;event.predicted_input_work_j=NAN;
   event.predicted_post_input_work_j=NAN;event.predicted_work_change_j=NAN;
   event.q_command_mA_s=NAN;event.q_effective_pred_mA_s=NAN;
+  status_.current_audit_q_target_mA_s=NAN;status_.current_audit_q_pred_mA_s=NAN;
   event.q_command_direction=1;event.command_matches_zero_cross_motion=true;
   event.command_current_mA=trial.current_ma;event.pulse_width_ms=trial.width_ms;
   event.pulse_start_ms=t_test_ms;event.pulse_end_ms=t_test_ms+trial.width_ms;
