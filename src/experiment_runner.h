@@ -398,6 +398,8 @@ private:
       PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,uint32_t t_test_ms,float fast_v,
       wheel_work_energy_control::Choice& choice,int16_t& current,
       const lateral_energy::CurrentTable*& table);
+  bool __attribute__((noinline)) prepareUnmodeledWalkCoast(
+      PsramLogger::EnergyControlAutonomousZeroCrossEvent& event) const;
   void __attribute__((noinline)) choosePeakMpc(PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
       float fast_v,wheel_work_energy_control::Choice& choice,int16_t& current,
       const lateral_energy::CurrentTable*& table) const;
