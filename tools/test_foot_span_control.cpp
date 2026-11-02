@@ -1,143 +1,199 @@
 #include "foot_span_control.h"
 #include <cassert>
+#include <cmath>
 #include <iostream>
 using namespace foot_span_control;
-static Cycle c(uint32_t s,uint32_t e,float l,float r,uint16_t width,uint32_t neg=1) {
-  Cycle x;x.start_ms=s;x.end_ms=e;x.positive_ms=(s+e)/2;x.left=l;x.right=r;x.negative_peak=5.f;x.target_mj=1.f;
-  x.negative_key=neg;x.positive_width=width;x.positive_ma=400;x.positive_sign=1;
+static Cycle cycle(uint32_t start,float left,float right,uint16_t width,
+                   int16_t current=400,uint32_t negative=1,float peak=5.f) {
+  Cycle x;x.start_ms=start;x.end_ms=start+100;x.positive_ms=start+50;
+  x.left=left;x.right=right;x.negative_peak=peak;x.target_mj=1.f;
+  x.negative_key=negative;x.positive_width=width;x.positive_ma=current;x.positive_sign=1;
   x.complete=x.negative_known=x.positive_executed=true;return x;
 }
-static void command(Controller& x,uint32_t t,uint16_t expected,uint16_t base=80,uint16_t cap=100,bool allowed=true) {
-  auto got=x.limit(t,base,400,1,cap,allowed,1.f); if(got!=expected) std::cerr<<"t="<<t<<" got="<<got<<" expected="<<expected<<" state="<<int(x.state())<<"\n"; assert(got==expected);
-  x.confirm(t,true,400,1,expected);
+static uint16_t command(Controller& x,uint32_t when,uint16_t base=80,
+                        int16_t ma=400,uint16_t cap=100,bool allowed=true) {
+  auto n=x.limit(when,base,ma,1,cap,allowed,1.f);
+  x.confirm(when,n>0,ma,1,n);return n;
 }
-static void baseline(Controller& x) {
-  command(x,150,80);x.cycle(c(100,200,3,1,80));
-  command(x,250,80);x.cycle(c(200,300,3,1,80));
-}
-int main() {
-  // Smaller input improves camera span discrepancy: hold the minus probe.
-  Controller a;baseline(a);command(a,350,75);assert(a.state()==State::ProbeMinus);
-  command(a,450,75);a.cycle(c(400,500,2.8f,1.2f,75));
-  command(a,550,75);a.cycle(c(500,600,2.8f,1.2f,75));
-  assert(a.state()==State::Hold);command(a,650,75);
-  // Unchanged or worsened observation restores, then tries the other direction.
-  Controller b;baseline(b);command(b,350,75);
-  command(b,450,75);b.cycle(c(400,500,3,1,75));
-  command(b,550,75);b.cycle(c(500,600,3,1,75));
-  assert(b.state()==State::Restore);command(b,650,80);assert(b.state()==State::Collect);
-  // Opposite-direction trial must wait for TWO new complete baseline cycles.
-  command(b,750,80);b.cycle(c(700,800,3,1,80));
-  command(b,850,80);b.cycle(c(800,900,3,1,80));
-  command(b,950,85);assert(b.state()==State::ProbePlus);
-  command(b,1050,85);b.cycle(c(1000,1100,2.8f,1.2f,85));
-  command(b,1150,85);b.cycle(c(1100,1200,2.8f,1.2f,85));assert(b.state()==State::Hold);
-  // A large apparent error improvement caused by collapsed movement or
-  // weakened body oscillation is rejected, not mistaken for improvement.
-  Controller collapse;baseline(collapse);command(collapse,350,75);command(collapse,450,75);
-  collapse.cycle(c(400,500,.4f,.4f,75));assert(collapse.state()==State::Restore);
-  Controller weak;baseline(weak);command(weak,350,75);command(weak,450,75);
-  auto lowpeak=c(400,500,3,1,75);lowpeak.negative_peak=4.4f;weak.cycle(lowpeak);
-  assert(weak.state()==State::Restore);
-  // A changed negative decision cannot be counted as a comparable response.
-  Controller d;baseline(d);command(d,350,75);command(d,450,75);
-  d.cycle(c(400,500,2.8f,1.2f,75,2));assert(d.acceptedProbeCycles()==0);
-  command(d,550,75);d.cycle(c(500,600,2.8f,1.2f,75));assert(d.acceptedProbeCycles()==1);
-  // Missing evidence and unexecuted/forged command cannot create baseline.
-  Controller f;auto fake=c(100,200,3,1,80);f.cycle(fake);f.cycle(c(200,300,3,1,80));
-  assert(f.limit(350,80,400,1,100,true,1.f)==80);assert(f.state()==State::Collect);
-  Controller g;baseline(g);assert(g.limit(350,80,400,1,100,true,1.f)==75);
-  g.confirm(350,false,400,1,0);assert(g.fault());assert(g.requireNeutral());assert(g.limit(450,80,400,1,100,true,1.f)==0);
-  g.reset();assert(!g.fault());
-  // Disallowed control and tighter cap win over experiment; re-acquire later.
-  Controller h;baseline(h);command(h,350,75);assert(h.limit(450,80,400,1,70,true,1.f)==70);
-  h.confirm(450,true,400,1,70);assert(h.state()==State::Collect);h.reset();baseline(h);command(h,350,75);
-  assert(h.limit(450,80,400,1,100,false,1.f)==0 && h.state()==State::Restore);
-  h.confirm(450,false,0,0,0);command(h,550,80,95,100);assert(h.state()==State::Restore);
-  // No supported negative pair for a long interval: bounded timeout restores
-  // instead of permanent adaptation lock, and can attempt another probe.
-  Controller k;baseline(k);command(k,350,75);assert(k.limit(2351,80,400,1,100,true,1.f)==80);
-  k.confirm(2351,true,400,1,80);assert(k.state()==State::Collect);
-  // Missing measurements reset unproven reference; reference needs 2 new cycles.
-  Controller m;command(m,150,80);m.cycle(c(100,200,3,1,80));
-  auto missing=c(200,300,3,1,80);missing.complete=false;m.cycle(missing);
-  command(m,350,80);m.cycle(c(300,400,3,1,80));
-  assert(m.limit(450,80,400,1,100,true,1.f)==80);
-  // Hold expires on absent comparable observation, restoring rather than
-  // indefinitely carrying an experimental command through missing data.
-  Controller stale;baseline(stale);command(stale,350,75);command(stale,450,75);
-  stale.cycle(c(400,500,2.8f,1.2f,75));command(stale,550,75);
-  stale.cycle(c(500,600,2.8f,1.2f,75));assert(stale.state()==State::Hold);
-  assert(stale.limit(2601,80,400,1,100,true,1.f)==80);
-  stale.confirm(2601,true,400,1,80);assert(stale.state()==State::Collect);
-  // Delayed data from before the first probe must not trigger a guard.
-  Controller old;baseline(old);command(old,350,75);
-  auto prior=c(300,400,.1f,.1f,75);old.cycle(prior);assert(old.state()==State::ProbeMinus);
-  // Baseline jumps while probing: restore through +5ms confirmed steps.
-  Controller jump;baseline(jump);command(jump,350,75);
-  command(jump,450,80,100,100);assert(jump.state()==State::Restore);
-  command(jump,550,85,100,100);command(jump,650,90,100,100);
-  command(jump,750,95,100,100);command(jump,850,100,100,100);assert(jump.state()==State::Collect);
-  // An incomparable negative command cannot be misattributed as probe harm.
-  Controller nc;baseline(nc);command(nc,350,75);command(nc,450,75);
-  nc.cycle(c(400,500,.1f,.1f,75,2));assert(nc.state()==State::ProbeMinus);
-  // Variable baseline must NOT launch a probe from a misleading 2-cycle mean.
-  Controller noisy;command(noisy,150,80);noisy.cycle(c(100,200,3,1,80));
-  command(noisy,250,80);noisy.cycle(c(200,300,3.5f,1,80));
-  assert(noisy.limit(350,80,400,1,100,true,1.f)==80);noisy.confirm(350,true,400,1,80);
-  noisy.cycle(c(300,400,3.45f,1,80));command(noisy,450,75);
-  command(noisy,550,75);noisy.cycle(c(500,600,3.2f,1.2f,75));
-  command(noisy,650,75);noisy.cycle(c(600,700,3.4f,1.0f,75));assert(noisy.state()==State::Restore);
-  // Reject a spurious improvement when it is smaller than observed variation.
-  Controller jitter;baseline(jitter);command(jitter,350,75);command(jitter,450,75);
-  jitter.cycle(c(400,500,3,1.07f,75));command(jitter,550,75);
-  jitter.cycle(c(500,600,2.9f,1.07f,75));assert(jitter.state()==State::Restore);
-  // Unsent candidate can return to the confirmed safe baseline without fault.
-  Controller unsent;baseline(unsent);assert(unsent.limit(350,80,400,1,100,true,1.f)==75);
-  assert(unsent.cancelUnsent(80));unsent.confirm(350,true,400,1,80);assert(!unsent.requireNeutral());
-  // A candidate which cannot be formed during a wide baseline change must
-  // skip that crossing and retain the last actual width for gradual restore.
-  Controller skipped;baseline(skipped);command(skipped,350,75);
-  assert(skipped.limit(450,95,400,1,100,true,1.f)==80);
-  assert(!skipped.cancelUnsent(95));skipped.confirm(450,false,0,0,0);
-  command(skipped,550,80,95,100);assert(skipped.state()==State::Restore);
-  command(skipped,650,85,95,100);command(skipped,750,90,95,100);
-  command(skipped,850,95,95,100);assert(skipped.state()==State::Collect);
-  // Once already balanced within the evidence threshold, keep baseline.
-  Controller balanced;command(balanced,150,80);balanced.cycle(c(100,200,2,2,80));
-  command(balanced,250,80);balanced.cycle(c(200,300,2,2,80));
-  assert(balanced.limit(350,80,400,1,100,true,1.f)==80 && balanced.state()==State::Collect);
-  // A valid ordinary selector switching 400mA/75ms -> 300mA/73ms must not
-  // repeatedly suppress positive output or be falsely confirmed as a probe.
-  Controller mode;baseline(mode);command(mode,350,75);
-  assert(mode.limit(450,73,300,1,100,true,1.f)==73);
-  assert(mode.state()==State::Collect && !mode.requireNeutral());
-  mode.confirm(450,true,300,1,73);
-  assert(mode.limit(550,73,300,1,100,true,1.f)==73);
-  mode.confirm(550,true,300,1,73);
-  auto not400=c(400,500,3,1,73);not400.positive_ma=300;mode.cycle(not400);
-  assert(mode.state()==State::Collect);
-  // A selector/model-mode switch is not a sensor fault; handing control back
-  // to the ordinary fallback never latches a neutral request.
-  Controller modebranch;baseline(modebranch);command(modebranch,350,75);
-  assert(modebranch.selectorUnavailable(450));assert(modebranch.state()==State::Collect);
-  assert(!modebranch.requireNeutral());modebranch.confirm(450,true,300,1,73);
-  assert(modebranch.selectorUnavailable(550));modebranch.confirm(550,true,300,1,73);
-  assert(!modebranch.requireNeutral());
-  // All three ordinary selector currents probe at the SAME current as the
-  // two actual baseline cycles; current changes re-acquire references.
-  for(int16_t ma: {int16_t(300),int16_t(350),int16_t(400)}) {
-    Controller same;
-    assert(same.limit(150,80,ma,1,100,true,1.f)==80);same.confirm(150,true,ma,1,80);
-    auto first=c(100,200,3,1,80);first.positive_ma=ma;same.cycle(first);
-    assert(same.limit(250,80,ma,1,100,true,1.f)==80);same.confirm(250,true,ma,1,80);
-    auto second=c(200,300,3,1,80);second.positive_ma=ma;same.cycle(second);
-    assert(same.anchorCurrent()==ma && same.limit(350,80,ma,1,100,true,1.f)==75);
-    same.confirm(350,true,ma,1,75);assert(!same.requireNeutral());
-    assert(same.limit(450,73,ma==300?350:300,1,100,true,1.f)==73);
-    assert(same.state()==State::Collect && !same.requireNeutral());
-  }
-  Controller wrong_ma;baseline(wrong_ma);assert(wrong_ma.limit(350,80,400,1,100,true,1.f)==75);
-  wrong_ma.confirm(350,true,300,1,75);assert(wrong_ma.requireNeutral());
-  std::cout<<"foot span controller: probes, confirmed outputs, incomparable cycles and reacquisition PASS\n";
+int main(){
+  Controller a;
+  assert(command(a,150)==80);a.cycle(cycle(100,3,1,80));
+  assert(command(a,250)==80);a.cycle(cycle(200,3,1,80));
+  assert(a.offset()==-10);assert(command(a,350)==70);
+  a.cycle(cycle(300,3,1,70));assert(a.offset()==-10); // overlaps command
+  assert(command(a,450)==70);a.cycle(cycle(400,3,1,70,400,2)); // different negative mode
+  assert(a.offset()==-20);assert(command(a,550)==60);
+  a.cycle(cycle(500,3,1,60,400,3));assert(command(a,650)==60);
+  a.cycle(cycle(600,3,1,60,400,4));assert(a.offset()==-30);
+  assert(command(a,750)==50);a.cycle(cycle(700,3,1,50));
+  assert(command(a,850)==50);a.cycle(cycle(800,3,1,50));
+  assert(a.offset()==-30); // conservative offset limit, no artificial model-domain latch
+  // Multiple completed cycles delivered together must not accumulate two
+  // adjustments before one altered motor command has actually been issued.
+  Controller delayed;
+  assert(command(delayed,150)==80);delayed.cycle(cycle(100,3,1,80));
+  assert(command(delayed,250)==80);assert(command(delayed,350)==80);
+  delayed.cycle(cycle(200,3,1,80));assert(delayed.offset()==-10);
+  delayed.cycle(cycle(300,3,1,80));assert(delayed.offset()==-10);
+  assert(command(delayed,450)==70);
+  // Opposite measured asymmetry selects the opposite correction.
+  Controller b;assert(command(b,150)==80);b.cycle(cycle(100,1,3,80));
+  assert(command(b,250)==80);b.cycle(cycle(200,1,3,80));
+  assert(b.offset()==10);assert(command(b,350)==90);
+  // Equal spans do not force an intervention.
+  Controller equal;assert(command(equal,150)==80);equal.cycle(cycle(100,2,2,80));
+  assert(command(equal,250)==80);equal.cycle(cycle(200,2,2,80));assert(command(equal,350)==80);
+  // Startup, missing data and fabricated or duplicate commands do not update.
+  Controller missing;auto fake=cycle(100,3,1,80);missing.cycle(fake);
+  assert(command(missing,250)==80);auto invalid=cycle(200,3,1,80);invalid.complete=false;missing.cycle(invalid);
+  assert(command(missing,350)==80);missing.cycle(cycle(300,3,1,80));
+  assert(missing.offset()==0);missing.cycle(cycle(300,3,1,80));assert(missing.offset()==0);
+  // 2 consecutive weak peaks cause the applied offset to reduce, rather than
+  // interpreting stationary or collapsed gait as a successful balance.
+  Controller weak;assert(command(weak,150)==80);weak.cycle(cycle(100,3,1,80));
+  assert(command(weak,250)==80);weak.cycle(cycle(200,3,1,80));
+  assert(command(weak,350)==70);weak.cycle(cycle(300,3,1,70,400,1,4.f));
+  assert(command(weak,450)==70);weak.cycle(cycle(400,3,1,70,400,1,4.f));
+  assert(command(weak,550)==60);weak.cycle(cycle(500,3,1,60,400,1,4.f));
+  assert(command(weak,650)==60);weak.cycle(cycle(600,3,1,60,400,1,4.f));
+  assert(weak.offset()==-10); // one step toward baseline after two post-change weak peaks
+  // The requested correction may legitimately lower the larger left span
+  // while maintaining the right span. A decrease in their sum alone is not
+  // gait collapse and must not undo a closing left-right difference.
+  Controller closing;assert(command(closing,150)==80);closing.cycle(cycle(100,3,1,80));
+  assert(command(closing,250)==80);closing.cycle(cycle(200,3,1,80));
+  assert(command(closing,350)==70);closing.cycle(cycle(300,2.2f,1,70));
+  assert(command(closing,450)==70);closing.cycle(cycle(400,2.2f,1,70));
+  assert(closing.offset()==-20);assert(command(closing,550)==60);
+  closing.cycle(cycle(500,1.6f,1,60));assert(command(closing,650)==60);
+  closing.cycle(cycle(600,1.6f,1,60));assert(closing.offset()==-30);
+  // Both feet falling to less than 35% of the baseline twice DOES trigger
+  // reduction of the correction even if the body peak has not yet fallen.
+  Controller collapse;assert(command(collapse,150)==80);collapse.cycle(cycle(100,3,1,80));
+  assert(command(collapse,250)==80);collapse.cycle(cycle(200,3,1,80));
+  assert(command(collapse,350)==70);collapse.cycle(cycle(300,.3f,.1f,70));
+  assert(command(collapse,450)==70);collapse.cycle(cycle(400,.3f,.1f,70));
+  assert(command(collapse,550)==60);collapse.cycle(cycle(500,.3f,.1f,60));
+  assert(command(collapse,650)==60);collapse.cycle(cycle(600,.3f,.1f,60));
+  assert(collapse.offset()==-10);
+  // Two successive worsened observations invert the exploratory response
+  // direction; the absolute outcome remains an empirical hardware question.
+  Controller trend;assert(command(trend,150)==80);trend.cycle(cycle(100,3,1,80));
+  assert(command(trend,250)==80);trend.cycle(cycle(200,3,1,80));
+  assert(command(trend,350)==70);trend.cycle(cycle(300,3,1,70));
+  assert(command(trend,450)==70);trend.cycle(cycle(400,3.3f,1,70));
+  assert(trend.offset()==-20);assert(command(trend,550)==60);
+  trend.cycle(cycle(500,3.3f,1,60));assert(command(trend,650)==60);
+  trend.cycle(cycle(600,3.6f,1,60));assert(trend.offset()==-10); // reversed
+  // Error reverses because the other foot has the larger span: the
+  // correction must move back through zero and toward the other direction.
+  Controller reversal;assert(command(reversal,150)==80);reversal.cycle(cycle(100,3,1,80));
+  assert(command(reversal,250)==80);reversal.cycle(cycle(200,3,1,80));
+  assert(command(reversal,350)==70);reversal.cycle(cycle(300,1,5,70));
+  assert(command(reversal,450)==70);reversal.cycle(cycle(400,1,5,70));
+  assert(reversal.offset()==0);assert(command(reversal,550)==80);
+  // An output mismatch must immediately demand a neutral/fault action.
+  Controller fault;assert(command(fault,150)==80);fault.cycle(cycle(100,3,1,80));
+  assert(command(fault,250)==80);fault.cycle(cycle(200,3,1,80));
+  assert(fault.limit(350,80,400,1,100,true,1.f)==70);fault.confirm(350,false,400,1,0);
+  assert(fault.requireNeutral());assert(fault.limit(450,80,400,1,100,true,1.f)==0);
+  fault.reset();assert(!fault.requireNeutral());
+  // Missing camera evidence decays the offset to baseline without a permanent
+  // lock. A later pair of valid cycles may restart adaptation.
+  Controller stale;assert(command(stale,150)==80);stale.cycle(cycle(100,3,1,80));
+  assert(command(stale,250)==80);stale.cycle(cycle(200,3,1,80));
+  assert(command(stale,350)==70);assert(command(stale,3000)==80);assert(stale.offset()==0);
+  // Narrower safety cap always wins; no request can exceed it.
+  Controller cap;assert(command(cap,150)==80);cap.cycle(cycle(100,1,3,80));
+  assert(command(cap,250)==80);cap.cycle(cycle(200,1,3,80));
+  assert(cap.limit(350,80,400,1,75,true,1.f)<=75);
+  // Anti-windup: a right-greater-than-left command requesting +10ms while
+  // baseline=cap=80 remains at 80 and the blocked correction does not build
+  // to +20/+30; lifting the cap alone cannot cause a surprise jump.
+  Controller windup;assert(command(windup,150,80,400,80)==80);windup.cycle(cycle(100,1,3,80));
+  assert(command(windup,250,80,400,80)==80);windup.cycle(cycle(200,1,3,80));
+  assert(windup.offset()==10);assert(command(windup,350,80,400,80)==80);assert(windup.offset()==0 && windup.state()==State::Collect);
+  windup.cycle(cycle(300,1,3,80));assert(command(windup,450,80,400,80)==80);
+  windup.cycle(cycle(400,1,3,80));assert(command(windup,550,80,400,80)==80);
+  assert(windup.offset()==0);assert(command(windup,650,80,400,100)==80);
+  // A hard cap always limits the result even if the normal selector or
+  // an offset causes a >10ms change from the previous physical command.
+  Controller hard;assert(command(hard,150)==80);hard.cycle(cycle(100,3,1,80));
+  assert(command(hard,250)==80);hard.cycle(cycle(200,3,1,80));
+  assert(command(hard,350)==70);assert(hard.selectorUnavailable(450));
+  hard.confirm(450,true,400,1,100);assert(hard.limit(550,80,400,1,75,true,1.f)==65);
+  hard.confirm(550,true,400,1,65);assert(!hard.fault());
+  // Current and model changes do not create a permanent out-of-range stop.
+  Controller modes;assert(command(modes,150)==80);modes.cycle(cycle(100,3,1,80));
+  assert(command(modes,250)==80);modes.cycle(cycle(200,3,1,80));
+  assert(command(modes,350)==70);assert(modes.selectorUnavailable(450));
+  modes.confirm(450,true,300,1,73);assert(!modes.requireNeutral());
+  assert(modes.limit(550,73,300,1,100,true,1.f)==63);
+  modes.confirm(550,true,300,1,63);assert(!modes.requireNeutral());
+  // Current changes in 304's ordinary selector (400->300->400->350)
+  // must not reset a maintained correction or suppress ordinary walking.
+  // Same width at different current does not imply equal physical work.
+  assert(a.offset()==-30);assert(a.limit(950,73,300,1,100,true,1.f)==43);
+  a.confirm(950,true,300,1,43);a.cycle(cycle(900,3,1,43,300));
+  assert(a.offset()==-30);assert(a.limit(1050,85,400,1,100,true,1.f)==55);
+  a.confirm(1050,true,400,1,55);a.cycle(cycle(1000,3,1,55,400));
+  assert(a.offset()==-30);assert(a.limit(1150,82,350,1,100,true,1.f)==52);
+  a.confirm(1150,true,350,1,52);a.cycle(cycle(1100,3,1,52,350));
+  assert(a.offset()==-30 && !a.fault());
+  // Slow but consistent worsening (>0.20 degrees across several complete
+  // observations) must reverse direction; no 0.15-degree individual jump.
+  Controller slow;assert(command(slow,150)==80);slow.cycle(cycle(100,3,1,80));
+  assert(command(slow,250)==80);slow.cycle(cycle(200,3,1,80));
+  assert(command(slow,350)==70);slow.cycle(cycle(300,3.04f,1,70));
+  assert(command(slow,450)==70);slow.cycle(cycle(400,3.04f,1,70));
+  assert(command(slow,550)==60);slow.cycle(cycle(500,3.08f,1,60));
+  assert(command(slow,650)==60);slow.cycle(cycle(600,3.08f,1,60));
+  assert(command(slow,750)==50);slow.cycle(cycle(700,3.12f,1,50));
+  assert(command(slow,850)==50);slow.cycle(cycle(800,3.12f,1,50));
+  assert(command(slow,950)==50);slow.cycle(cycle(900,3.16f,1,50));
+  assert(command(slow,1050)==50);slow.cycle(cycle(1000,3.20f,1,50));
+  assert(slow.offset()>-30); // polarity reversed despite gradual deterioration
+  assert(command(slow,1150)==60);slow.cycle(cycle(1100,3.24f,1,60));
+  // A baseline-width change is an actual input change too: the delayed cycle
+  // containing or preceding it cannot be used as post-change feedback.
+  Controller timing;assert(command(timing,150)==80);timing.cycle(cycle(100,3,1,80));
+  assert(command(timing,250)==80);timing.cycle(cycle(200,3,1,80));
+  assert(command(timing,350)==70);timing.cycle(cycle(300,3,1,70));
+  assert(command(timing,450,85)==75);timing.cycle(cycle(400,3,1,75));
+  assert(timing.offset()==-20); // ordinary selector change still allows feedback
+  assert(command(timing,550,85)==65);timing.cycle(cycle(500,3,1,65));
+  assert(timing.offset()==-20); // cycle overlaps feedback adjustment at 550
+  // A future ordinary baseline command must not cause an earlier complete
+  // cycle delivered late to be discarded. Feedback causality uses the epoch
+  // of the actual command inside that cycle, not a global last-input time.
+  Controller late;assert(command(late,150)==80);late.cycle(cycle(100,3,1,80));
+  assert(command(late,250)==80);late.cycle(cycle(200,3,1,80));
+  assert(command(late,350)==70);late.cycle(cycle(300,3,1,70));
+  assert(command(late,450)==70);
+  assert(command(late,550,81)==71); // future ordinary +1 ms baseline change
+  late.cycle(cycle(400,3,1,70));assert(late.offset()==-20);
+  // A series of ordinary 1ms selector changes is allowed to supply feedback;
+  // they are tracked as physical input changes, not attributed causes.
+  Controller jitterbase;assert(command(jitterbase,150)==80);jitterbase.cycle(cycle(100,3,1,80));
+  assert(command(jitterbase,250)==80);jitterbase.cycle(cycle(200,3,1,80));
+  assert(command(jitterbase,350)==70);jitterbase.cycle(cycle(300,3,1,70));
+  assert(command(jitterbase,450,81)==71);jitterbase.cycle(cycle(400,3,1,71));
+  assert(jitterbase.offset()==-20);
+  // A cancelled, unsent candidate falls back to the ordinary choice.
+  Controller cancel;assert(command(cancel,150)==80);cancel.cycle(cycle(100,3,1,80));
+  assert(command(cancel,250)==80);cancel.cycle(cycle(200,3,1,80));
+  assert(cancel.limit(350,80,400,1,100,true,1.f)==70);
+  assert(cancel.cancelUnsent(80));cancel.confirm(350,true,400,1,80);assert(!cancel.fault());
+  // A cancelled candidate is never treated as a confirmed adaptation or
+  // accumulated into a subsequent larger step.
+  assert(cancel.offset()==0);assert(command(cancel,450)==80);
+  // The ordinary selector may itself change by >10ms; the experimental
+  // offset limit does not suppress or claim to bound that baseline change.
+  Controller jumps;assert(command(jumps,150)==80);jumps.cycle(cycle(100,3,1,80));
+  assert(command(jumps,250)==80);jumps.cycle(cycle(200,3,1,80));
+  assert(command(jumps,350)==70);assert(jumps.selectorUnavailable(450));
+  jumps.confirm(450,true,400,1,100);
+  assert(jumps.limit(550,80,400,1,100,true,1.f)==70);
+  jumps.confirm(550,true,400,1,70);assert(!jumps.fault());
+  std::cout<<"foot span controller: accumulating feedback, feedback sign, fault and recovery PASS\n";
 }

@@ -22,6 +22,7 @@
 #include "wheel_work_energy_control.h"
 #include "unmodeled_walk_coast.h"
 #include "foot_span_candidate.h"
+#include "weak_side_assist.h"
 #include "walking_positive_cap.h"
 #include "peak_mpc.h"
 
@@ -3464,6 +3465,107 @@ bool ExperimentRunner::prepareUnmodeledWalkCoast(
   return true;
 }
 
+bool ExperimentRunner::tryWeakSideAssist(
+    PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
+    const wheel_work_energy_control::Choice& normal,bool unmodeled_coast,
+    uint32_t t_test_ms,float fast_v) {
+  // Never turn an invalid selector into a pulse unless the existing explicit
+  // unmodeled-coast classifier has already confirmed a healthy finite state.
+  if(!wheelWorkMode() || event.physical_next_peak_side!=-1 ||
+      (!normal.valid && !unmodeled_coast) ||
+      (normal.valid && normal.width_ms!=0)) return false;
+
+  weak_side_assist::Input in;
+  in.target_preset_deg=event.target_peak_deg;
+  in.active_target_deg=gradual_start_.target();
+  in.physical_next_side=event.physical_next_peak_side;
+  in.now_ms=t_test_ms;
+  for(const auto& p:phase_negative_peaks_) {
+    if(!p.ms || p.ms>=t_test_ms || !std::isfinite(p.amplitude) || p.amplitude<=0.f)continue;
+    ++in.negative_peak_count;
+    if(p.ms>in.last_negative_peak_ms) {
+      in.last_negative_peak_ms=p.ms;in.last_negative_peak_deg=p.amplitude;
+    }
+  }
+  in.last_positive_peak_deg=event.previous_peak_side>0 ? event.previous_peak_amplitude_deg : NAN;
+  in.crossing_rate_dps=event.zero_cross_abs_rate_dps;
+  in.wheel_rpm=event.pre_input_wheel_speed_rpm;
+  in.battery_mv=static_cast<float>(event.vbat_mV);
+  in.hardware_healthy=!status_.emergency_stop && status_.state==ExperimentState::RUNNING_BATCH_SWEEP &&
+      !status_.pulse_active && roller_ && roller_->ok() && imu_ && imu_->acquisitionHealthy() &&
+      !imu_->stale(millis()) && !event.side_mismatch_diagnostic && std::isfinite(event.target_energy_j) &&
+      event.target_energy_j>0.f && event.previous_peak_time_ms>0 &&
+      t_test_ms>=event.previous_peak_time_ms && t_test_ms-event.previous_peak_time_ms<=1500;
+  in.speed_fresh=peak_error_adaptation::speedUsable(event.pre_input_wheel_speed_rpm,
+      event.pre_input_wheel_speed_valid,event.pre_input_wheel_speed_age_us);
+  in.selector_valid=normal.valid;in.selector_width_ms=normal.width_ms;
+  in.hardware_max_width_ms=Config::ENERGY_CONTROL_AUTONOMOUS_MAX_PULSE_MS<70
+      ? Config::ENERGY_CONTROL_AUTONOMOUS_MAX_PULSE_MS : 70;
+  const auto assist=weak_side_assist::choose(in);
+  if(!assist.selected)return false;
+
+  // Charge is an actuator-model estimate, not a measured current integral.
+  // Match the ordinary negative excitatory command's motion-aligned signs.
+  const float initial_ma=static_cast<float>(event.physical_next_peak_side)*event.i0_estimated_mA;
+  const float goal_ma=predictCurrentGoalMa(assist.current_ma,fast_v);
+  const float q=lateral_energy::charge(lateral_current_table_,assist.width_ms,initial_ma,goal_ma);
+  if(!std::isfinite(q) || q<0.f || q>25.f || assist.width_ms==0 ||
+      assist.width_ms>Config::ENERGY_CONTROL_AUTONOMOUS_MAX_PULSE_MS) return false;
+
+  // Branch 13 stores planned width separately from actual pulse_width_ms;
+  // a failed send retains this proposal but records actual width/current 0.
+  event.solver_selected_integer_width_ms=assist.width_ms;
+  event.work_control_branch=13;
+  event.energy_model_extrapolated=true;event.work_prediction_cross_condition=true;
+  event.work_brake_cap_ms=in.hardware_max_width_ms;
+  event.passive_energy_j=NAN;event.free_next_peak_amplitude_deg=NAN;
+  event.predicted_energy_j=NAN;event.predicted_observed_energy_j=NAN;
+  event.predicted_next_peak_amplitude_deg=NAN;event.predicted_observed_next_peak_deg=NAN;
+  event.predicted_wheel_work_j=NAN;event.predicted_input_work_j=NAN;
+  event.predicted_post_input_work_j=NAN;event.predicted_work_change_j=NAN;
+  event.q_command_direction=event.physical_next_peak_side*assist.motion_sign;
+  event.command_matches_zero_cross_motion=true;
+  event.q_command_mA_s=q;event.q_effective_pred_mA_s=q;
+  event.predicted_current_goal_mA=goal_ma;event.predicted_current_rise_tau_s=lateral_current_table_.tau;
+  event.aligned_initial_current_mA=initial_ma;
+  event.command_current_mA=assist.current_ma;event.pulse_width_ms=assist.width_ms;
+  event.pulse_start_ms=t_test_ms;event.pulse_end_ms=t_test_ms+assist.width_ms;
+  event.valid=false;event.output_executed=false;
+  status_.current_audit_q_target_mA_s=q;status_.current_audit_q_pred_mA_s=q;
+  const uint32_t now_ms=run_start_ms_+t_test_ms;
+  if(!beginEnergyControlAutonomousPulse(now_ms,t_test_ms,event.q_command_direction,
+                                        assist.width_ms,assist.current_ma)) {
+    event.command_current_mA=0;event.pulse_width_ms=0;
+    event.pulse_start_ms=0;event.pulse_end_ms=0;
+    event.reason=Config::ENERGY_CONTROL_AUTONOMOUS_REASON_CURRENT_WRITE_FAILED;
+    return true;
+  }
+  event.valid=true;event.output_executed=true;event.reason=Config::ENERGY_CONTROL_AUTONOMOUS_REASON_NONE;
+  // Record the actual command for the matching next physical negative peak,
+  // without fabricating an arrival prediction or feeding any fitted model.
+  pending_cg_shift_mm_=run_cg_shift_mm_;
+  pending_target_energy_j_=event.target_energy_j;
+  energy_control_autonomous_pending_peak_=true;
+  energy_control_autonomous_pending_probe_=true;
+  energy_control_autonomous_pending_next_side_=event.physical_next_peak_side;
+  // Pair with the active ramped target whose energy was actually requested,
+  // not merely the operator's eventual 8-degree preset.
+  energy_control_autonomous_pending_target_deg_=in.active_target_deg;
+  energy_control_autonomous_pending_q_command_mA_s_=q;
+  energy_control_autonomous_pending_model_energy_j_=NAN;
+  energy_control_autonomous_pending_wheel_rpm_=event.pre_input_wheel_speed_rpm;
+  energy_control_autonomous_pending_wheel_age_us_=event.pre_input_wheel_speed_age_us;
+  energy_control_autonomous_pending_wheel_valid_=event.pre_input_wheel_speed_valid;
+  energy_control_autonomous_pending_zero_ms_=event.zero_cross_time_ms;
+  energy_control_autonomous_pending_mode_=peak_error_adaptation::modeForSignedCharge(q);
+  energy_control_autonomous_pending_saturated_upper_=false;
+  energy_control_autonomous_pending_saturated_lower_=false;
+  work_positive_pending_=false;work_negative_pending_=false;
+  work_walking_pending_=false;work_walking_low_pending_=false;
+  walking_loss_feedback_.interrupt();walking_low_speed_guard_.interrupt();adaptive_cg_.breakPair();
+  return true;
+}
+
 bool ExperimentRunner::selectFootPhaseOutput(
     PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,uint32_t t_test_ms,float fast_v,
     wheel_work_energy_control::Choice& work_choice,int16_t& selected_current_mA,
@@ -3823,11 +3925,19 @@ void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(uint32_t t_test_
     work_choice=chooseWheelWork(event,fast_v,&event.rate_support_diagnostic,
         &selected_current_mA,&selected_current_table,
         event.target_peak_deg==8.f && event.physical_next_peak_side>0 ? gradual_start_.positiveCapMs() : 100);
-  // No fitted model covers this negative-side state. Do not invent a
-  // prediction or a pulse: explicitly coast, keep observing the gait and
-  // retain all real hardware, attitude and emergency guards.
-  if(work_mode && event.physical_next_peak_side<0 && !work_choice.valid &&
-      prepareUnmodeledWalkCoast(event)) {
+  // First classify a missing model with the existing sensor/hardware checks.
+  // Only a valid normal coast or this explicit unmodeled coast can be
+  // considered for the separately logged, unverified weak-side assist.
+  const bool unmodeled_coast=work_mode && event.physical_next_peak_side<0 && !work_choice.valid &&
+      prepareUnmodeledWalkCoast(event);
+  if(work_mode && event.physical_next_peak_side<0 &&
+      tryWeakSideAssist(event,work_choice,unmodeled_coast,t_test_ms,fast_v)) {
+    finishFootEnergyDecision(event,t_test_ms);
+    // A successful output owns its half-cycle until updatePulse stops it.
+    if(!event.output_executed)rearm_for_next_peak();
+    return;
+  }
+  if(unmodeled_coast) {
     finishFootEnergyDecision(event,t_test_ms);rearm_for_next_peak();return;
   }
   const bool phase_skip_output=work_mode && event.target_peak_deg==8.f && event.physical_next_peak_side>0 &&

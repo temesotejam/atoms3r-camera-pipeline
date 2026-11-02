@@ -412,6 +412,12 @@ private:
       const lateral_energy::CurrentTable*& table);
   bool __attribute__((noinline)) prepareUnmodeledWalkCoast(
       PsramLogger::EnergyControlAutonomousZeroCrossEvent& event) const;
+  // Returns true only when an experimental assist was actually attempted.
+  // The caller records the event and rearms only after a failed command.
+  bool __attribute__((noinline)) tryWeakSideAssist(
+      PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
+      const wheel_work_energy_control::Choice& normal,bool unmodeled_coast,
+      uint32_t t_test_ms,float fast_v);
   void __attribute__((noinline)) choosePeakMpc(PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
       float fast_v,wheel_work_energy_control::Choice& choice,int16_t& current,
       const lateral_energy::CurrentTable*& table) const;
