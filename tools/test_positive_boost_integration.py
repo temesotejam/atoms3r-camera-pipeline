@@ -1,8 +1,9 @@
 """Compile the real positive-boost runner method with host hardware doubles.
 
-This exercises command decisions and matching, not motor physics or ESP timing.
-The peak notification and normal-output confirmation statements also come from
-the production runner, so the fixture does not reimplement their wiring.
+The helper is currently disconnected from the automatic runner and tested
+only in isolation here. This exercises its command decisions and matching,
+not motor physics, ESP timing, or automatic production activation. The peak
+notification and normal-output confirmation statements come from the runner.
 """
 from pathlib import Path
 import subprocess
@@ -32,9 +33,11 @@ assert 'event.peak_speed_valid && event.peak_speed_age_us<=30000' in helper
 assert 'energy_control_autonomous_pending_model_energy_j_=NAN;' in method
 assert 'energy_control_autonomous_pending_probe_=true;' in method
 assert 'work_positive_pending_=false;work_negative_pending_=false;' in method
-assert 'tryPositiveLeftBoost(event,work_choice,t_test_ms)) {' in runner
-caller = runner.split('tryPositiveLeftBoost(event,work_choice,t_test_ms)) {', 1)[1]
-assert 'finishFootEnergyDecision(event,t_test_ms);\n    if(!event.output_executed)rearm_for_next_peak();\n    return;' in caller
+# The old high-current helper remains available for isolated testing but is
+# intentionally disconnected from automatic walking. Reintroduction requires
+# an explicit design and integration review, not a silent call-site change.
+assert runner.count('tryPositiveLeftBoost(') == 1
+assert 'tryPositiveLeftBoost(event,work_choice,t_test_ms)' not in runner
 record = runner.split('bool ExperimentRunner::recordEnergyControlAutonomousPeak(', 1)[1].split(
     '\nvoid ExperimentRunner::', 1)[0]
 assert 'energyControlPeakTarget(physical_side)' in record

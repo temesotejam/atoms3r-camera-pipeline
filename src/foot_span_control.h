@@ -47,7 +47,7 @@ class Controller {
   void cycle(const Cycle& c) {
     if(c.end_ms<=last_end_ || fault())return;
     last_end_=c.end_ms;
-    if(!c.complete || !c.positive_executed || !supportedCurrent(c.positive_ma) ||
+    if(!c.complete || !c.negative_known || !c.positive_executed || !supportedCurrent(c.positive_ma) ||
        c.positive_sign!=1 || c.start_ms>=c.positive_ms || c.positive_ms>=c.end_ms ||
        !std::isfinite(c.left) || !std::isfinite(c.right) || c.left<0 || c.right<0 ||
        !std::isfinite(c.negative_peak) || c.negative_peak<=0 ||
@@ -78,6 +78,7 @@ class Controller {
     const float e=(c.left-c.right)/(c.left+c.right+.1f);
     observed_left_=c.left;observed_right_=c.right;observed_peak_=c.negative_peak;
     observed_error_=e;observed_current_=c.positive_ma;observed_target_=c.target_mj;
+    observed_negative_key_=c.negative_key;
     observed_baseline_=action->baseline;
     have_observation_=true;
     if(!have_reference_) {
@@ -98,7 +99,7 @@ class Controller {
     if(trial_active_) {
       const int base_delta=static_cast<int>(action->baseline)-static_cast<int>(trial_baseline_);
       if(!trial_reference_valid_ || c.positive_ma!=trial_current_ || std::fabs(c.target_mj-trial_target_)>.05f ||
-         base_delta>5 || base_delta< -5) {
+         base_delta>5 || base_delta< -5 || !comparableNegative(c.negative_key,trial_negative_key_)) {
         invalidateObservation();return;
       }
       const float weak=trial_right_?c.right:c.left;
@@ -107,10 +108,15 @@ class Controller {
       const float ratio=trial_ratio_sum_*.5f,weak_mean=trial_weak_sum_*.5f,peak=trial_peak_sum_*.5f;
       trial_active_=false;
       const bool weak_kept=weak_mean>=trial_weak_*.8f && weak_mean>=trial_weak_-.10f;
+      // Balance is only a useful success when the initially weaker foot has
+      // actually increased. A shrinking stronger foot alone must not be
+      // mistaken for a response to the changed command. This is a small
+      // observation threshold, not a precision or ground-stride guarantee.
+      const bool weak_improved=weak_mean>=trial_weak_*1.05f && weak_mean>=trial_weak_+.05f;
       const bool peak_kept=peak>=trial_peak_*.85f && peak>=trial_peak_-.5f;
       // No clear ratio improvement, loss of the smaller foot, or loss of
       // negative oscillation: unwind this offset step and explore oppositely.
-      if(!weak_kept || !peak_kept || ratio+.02f>=trial_ratio_) {
+      if(!weak_kept || !weak_improved || !peak_kept || ratio+.02f>=trial_ratio_) {
         polarity_=-polarity_;
         const int restored=towardZero(offset_ms_);
         state_=restored==0?State::Collect:State::Restore;
@@ -211,6 +217,7 @@ class Controller {
           trial_right_=observed_right_<=observed_left_;
           trial_weak_=trial_right_?observed_right_:observed_left_;
           trial_peak_=observed_peak_;trial_current_=ma;trial_target_=request_target_mj_;trial_baseline_=baseline_ms_;
+          trial_negative_key_=observed_negative_key_;
           const int before_delta=static_cast<int>(observed_baseline_)-static_cast<int>(baseline_ms_);
           trial_reference_valid_=observed_current_==ma && std::fabs(observed_target_-request_target_mj_)<=.05f &&
               before_delta<=5 && before_delta>= -5;
@@ -231,12 +238,22 @@ class Controller {
     state_=pending_change_?State::Restore:State::Collect;
   }
   static bool supportedCurrent(int16_t ma){return ma==300 || ma==350 || ma==400;}
+  // Keep distinct negative inputs out of the same response comparison.
+  // A 10 ms tolerance accommodates observed normal negative pulse changes;
+  // similar commands still do not establish an isolated causal response.
+  static bool comparableNegative(uint32_t a,uint32_t b){
+    if(a==1 || b==1)return a==1 && b==1;
+    if(!(a&0x80000000u) || !(b&0x80000000u) || ((a^b)&0x7fff8000u))return false;
+    const int delta=static_cast<int>(a&0x7fffu)-static_cast<int>(b&0x7fffu);
+    return delta>=-10 && delta<=10;
+  }
   static int towardZero(int value){return value>10?value-10:value< -10?value+10:0;}
   struct Actual {uint32_t ms=0,feedback_changed_ms=0;
     uint16_t width=0,baseline=0;int16_t ma=0;int8_t sign=0;bool executed=false;float target_mj=NAN;};
   Actual actual_[8];unsigned actual_next_=0,actual_count_=0;
   State state_=State::Collect;
   uint32_t last_end_=0,last_usable_end_=0,last_feedback_changed_ms_=0;
+  uint32_t observed_negative_key_=0,trial_negative_key_=0;
   uint16_t baseline_ms_=0,requested_=0;
   int16_t request_ma_=0;
   float request_target_mj_=NAN,filtered_error_=0,reference_peak_=0,reference_left_=0,reference_right_=0;

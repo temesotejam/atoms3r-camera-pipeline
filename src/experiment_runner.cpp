@@ -3629,16 +3629,10 @@ bool ExperimentRunner::selectFootPhaseOutput(
       }
       return false;
     }
-    // Prioritize the provisional left (+pitch) target over reducing the
-    // positive pulse to equalize camera spans. Missing/stale positive peaks
-    // also use the ordinary selector; hardware and momentum caps still apply.
-    if(!gradual_start_.positivePeakAtLeast(event.foot_balance_target_deg,t_test_ms)) {
-      if(!foot_span_control_.selectorUnavailable(t_test_ms)) {
-        requestEmergencyStop("foot_span_command_unresolved");return true;
-      }
-      event.foot_span_requested_ms=event.foot_span_baseline_ms;
-      return false;
-    }
+    // Judge the gait correction from completed, quality-checked foot cycles.
+    // A positive peak below its target must not erase this feedback: in the
+    // recorded walk that condition held throughout, so correction never ran.
+    // If a cycle is missing or stale, the controller returns the baseline.
     const uint16_t limited=foot_span_control_.limit(t_test_ms,event.foot_span_baseline_ms,
         work_choice.current_ma,work_choice.command_sign,work_choice.allowed_cap_ms,true,event.target_energy_j*1000.f);
     event.foot_span_requested_ms=limited;
@@ -4051,12 +4045,10 @@ void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(uint32_t t_test_
   if(unmodeled_coast) {
     finishFootEnergyDecision(event,t_test_ms);rearm_for_next_peak();return;
   }
-  if(work_mode && event.target_peak_deg==8.f && event.physical_next_peak_side>0 &&
-      tryPositiveLeftBoost(event,work_choice,t_test_ms)) {
-    finishFootEnergyDecision(event,t_test_ms);
-    if(!event.output_executed)rearm_for_next_peak();
-    return;
-  }
+  // Branch 14 is not selected here: in the 1.0.70 walk it repeatedly
+  // preempted camera-based correction, while higher current commands did not
+  // demonstrate a larger measured current. Keep ordinary control available
+  // when the foot observations are not suitable for feedback.
   const bool phase_skip_output=work_mode && event.target_peak_deg==8.f && event.physical_next_peak_side>0 &&
       selectFootPhaseOutput(event,t_test_ms,fast_v,work_choice,selected_current_mA,selected_current_table);
   if(phase_skip_output) {

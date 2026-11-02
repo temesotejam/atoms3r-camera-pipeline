@@ -186,5 +186,5 @@ int main() {
    assert(!r.tryPositiveLeftBoost(e,n,2600)&&!r.calls);}
   {ExperimentRunner r;seed(r);Event e=sample(2600);e.foot_balance_target_deg=9.5;
    assert(r.tryPositiveLeftBoost(e,normal(),2600)&&r.last_ma==500);}
-  std::cout<<"actual runner positive boost with hardware doubles PASS\n";
+  std::cout<<"disconnected runner positive boost helper with hardware doubles PASS\n";
 }

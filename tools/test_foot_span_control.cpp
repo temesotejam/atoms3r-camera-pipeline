@@ -32,6 +32,21 @@ int main(){
   Controller weak;tick(weak,100,3,1);tick(weak,200,3,1);
   tick(weak,300,2,.7f);tick(weak,400,2,.7f);tick(weak,500,2,.7f);
   assert(weak.offset()==0);
+  // Ratio improvement caused only by shrinking the larger foot does not
+  // satisfy the goal of increasing the weaker foot's observed motion.
+  Controller strong_shrinks;tick(strong_shrinks,100,3,1);tick(strong_shrinks,200,3,1);
+  tick(strong_shrinks,300,2,1);tick(strong_shrinks,400,2,1);tick(strong_shrinks,500,2,1);
+  assert(strong_shrinks.offset()==0 && !strong_shrinks.fault());
+  // Negative side conditions changing by more than 10 ms make a response
+  // incomparable. Discard the candidate and keep normal walking available.
+  Controller changed_negative;tick(changed_negative,100,3,1);tick(changed_negative,200,3,1);
+  tick(changed_negative,300,2.5f,1.1f,5,100,100,30);
+  tick(changed_negative,400,2.5f,1.1f,5,100,100,50);
+  assert(changed_negative.offset()==0 && !changed_negative.fault());
+  // The observed 20-to-30 ms variation remains comparable.
+  Controller ten_ms;tick(ten_ms,100,3,1,5,100,100,20);tick(ten_ms,200,3,1,5,100,100,20);
+  tick(ten_ms,300,2.5f,1.1f,5,100,100,20);tick(ten_ms,400,2.5f,1.1f,5,100,100,30);
+  tick(ten_ms,500,2.5f,1.1f,5,100,100,30);assert(ten_ms.offset()==-20);
   // Body oscillation falls although observed ratio improves.
   Controller peak;tick(peak,100,3,1);tick(peak,200,3,1);
   tick(peak,300,2.5,1.1,4);tick(peak,400,2.5,1.1,4);tick(peak,500,2.5,1.1,4);
@@ -65,7 +80,7 @@ int main(){
   pending_invalid.confirm(22220,true,400,1,90);
   Cycle prior;prior.start_ms=22017;prior.end_ms=22737;prior.positive_ms=22220;
   prior.left=2.5f;prior.right=1.1f;prior.negative_peak=5;prior.target_mj=1;
-  prior.negative_key=1;prior.positive_width=90;prior.positive_ma=400;prior.positive_sign=1;
+  prior.negative_key=0x80000000u | (300u<<16) | 0x8000u | 30u;prior.positive_width=90;prior.positive_ma=400;prior.positive_sign=1;
   prior.complete=prior.negative_known=prior.positive_executed=true;
   pending_invalid.cycle(prior); // analogous to the 23296ms event snapshot
   assert(pending_invalid.offset()==-20 && pending_invalid.acceptedProbeCycles()==1);

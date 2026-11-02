@@ -15,13 +15,8 @@ assert runner.count(start)==1 and runner.count(end)==1
 method=start+runner.split(start,1)[1].split(end,1)[0]
 select=runner.split('bool ExperimentRunner::selectFootPhaseOutput(',1)[1].split(
     '\nvoid ExperimentRunner::choosePeakMpc(',1)[0]
-assert select.index('if(!phase_sensors_fresh)') < select.index('positivePeakAtLeast(')
-assert select.index('positivePeakAtLeast(') < select.index('const uint16_t limited=')
-protect=select.split('if(!gradual_start_.positivePeakAtLeast(',1)[1].split(
-    'const uint16_t limited=',1)[0]
-assert 'foot_span_control_.selectorUnavailable(t_test_ms)' in protect
-assert 'event.foot_span_requested_ms=event.foot_span_baseline_ms;' in protect
-assert 'return false;' in protect
+assert select.index('if(!phase_sensors_fresh)') < select.index('const uint16_t limited=')
+assert 'positivePeakAtLeast(' not in select
 pending='energy_control_autonomous_pending_target_deg_ = work_mode && event.target_peak_deg==8.f\n      ? event.foot_balance_target_deg : event.target_peak_deg;'
 assert pending in runner
 peak=runner.split('bool ExperimentRunner::recordEnergyControlAutonomousPeak(',1)[1].split(
@@ -101,8 +96,8 @@ namespace PsramLogger {struct EnergyControlAutonomousZeroCrossEvent {
  float target_peak_deg=8,foot_balance_target_deg=10,target_energy_j=.001f;
  float pre_input_wheel_speed_rpm=200;bool pre_input_wheel_speed_valid=true;
  uint32_t pre_input_wheel_speed_age_us=1000;uint16_t vbat_mV=7800;
- int8_t physical_next_peak_side=1;bool side_mismatch_diagnostic=false;int reason=0;
- void setFootSpanFlag(int,bool){}
+ int8_t physical_next_peak_side=1;bool side_mismatch_diagnostic=false,span_selected=false;int reason=0;
+ void setFootSpanFlag(int flag,bool value){if(flag==Span_selected)span_selected=value;}
 };}
 struct Roller {bool ok()const{return true;}};
 struct Imu {bool acquisitionHealthy()const{return true;}bool stale(uint32_t)const{return false;}};
@@ -114,7 +109,7 @@ class ExperimentRunner {public:
  bool wheelWorkMode()const{return true;}
  void requestEmergencyStop(const char*){status_.emergency_stop=true;}
  wheel_work_energy_control::Choice chooseFootPhaseWidth(
-     const PsramLogger::EnergyControlAutonomousZeroCrossEvent&,const wheel_work_energy_control::Choice& c,uint16_t,float){return c;}
+     const PsramLogger::EnergyControlAutonomousZeroCrossEvent&,const wheel_work_energy_control::Choice& c,uint16_t width,float){auto result=c;result.width_ms=width;return result;}
  bool selectFootPhaseOutput(PsramLogger::EnergyControlAutonomousZeroCrossEvent&,uint32_t,float,
    wheel_work_energy_control::Choice&,int16_t&,const lateral_energy::CurrentTable*&);
 };
@@ -127,30 +122,37 @@ int main(){
  int16_t current=400;const lateral_energy::CurrentTable* table=nullptr;
  {ExperimentRunner r;Event e;
   // Develop a proposed -10ms correction, then demonstrate that an under-
-  // target positive peak cancels it before it can reduce the normal output.
+  // target positive peak does not discard valid foot feedback.
   auto sample=[&](uint32_t start){
    auto width=r.foot_span_control_.limit(start+50,80,400,1,100,true,1);
    r.foot_span_control_.confirm(start+50,true,400,1,width);
    foot_span_control::Cycle c;c.start_ms=start;c.end_ms=start+100;c.positive_ms=start+50;
    c.left=3;c.right=1;c.negative_peak=5;c.target_mj=1;c.positive_width=width;
+   c.negative_known=true;c.negative_key=1;
    c.positive_ma=400;c.positive_sign=1;c.complete=c.positive_executed=true;
    r.foot_span_control_.cycle(c);
   };
   sample(100);sample(200);assert(r.foot_span_control_.offset()==-10);
   r.gradual_start_.peak(1,5,300,true,300);
   assert(!r.selectFootPhaseOutput(e,350,7.8,choice,current,table));
-  assert(r.foot_span_control_.offset()==0 && e.foot_span_requested_ms==80);
-  assert(choice.width_ms==80 && !r.status_.emergency_stop);
+  assert(r.foot_span_control_.offset()==-10 && e.foot_span_requested_ms==70);
+  assert(choice.width_ms==70 && e.span_selected && !r.status_.emergency_stop);
  }
  {ExperimentRunner r;Event e;e.pre_input_wheel_speed_valid=false;
   assert(r.selectFootPhaseOutput(e,350,7.8,choice,current,table));
   assert(e.reason==Config::ENERGY_CONTROL_AUTONOMOUS_REASON_NONFINITE_STATE);
  }
+ {ExperimentRunner r;Event e;choice.width_ms=80;
+  // No completed usable camera cycle: keep the ordinary selection.
+  assert(!r.selectFootPhaseOutput(e,350,7.8,choice,current,table));
+  assert(choice.width_ms==80 && e.foot_span_requested_ms==80);
+  assert(!e.span_selected && !r.status_.emergency_stop);
+ }
  {ExperimentRunner r;Event e;r.gradual_start_.peak(1,11,300,true,300);
   assert(!r.selectFootPhaseOutput(e,350,7.8,choice,current,table));
   assert(!r.status_.emergency_stop);
  }
- std::cout<<"actual runner positive-target priority and sensor gate PASS\n";
+ std::cout<<"actual runner foot feedback below target and sensor gate PASS\n";
 }
 '''
 with tempfile.TemporaryDirectory(prefix='side_priority_runner_') as td:
