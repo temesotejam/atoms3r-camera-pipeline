@@ -19,7 +19,7 @@ allowed={
         '// User-selected 8-degree walking experiment limits. Other autonomous modes\n'
         '// continue using their own previously configured limits.\n'
         'static constexpr uint16_t WALKING_TARGET8_MAX_PULSE_MS = 150;\n'
-        'static constexpr int16_t WALKING_TARGET8_MAX_CURRENT_MA = 500;\n'],
+        'static constexpr int16_t WALKING_TARGET8_MAX_CURRENT_MA = 1200;\n'],
 }
 unchanged=['src/lateral_energy_control.h','src/peak_error_adaptation.h',
            'src/previous_peak_control_correction.h','src/control_math_cache.h',

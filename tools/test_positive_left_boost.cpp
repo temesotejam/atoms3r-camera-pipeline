@@ -9,115 +9,120 @@ static Input example() {
   Input x;x.now_ms=1000;x.opposite_peak_ms=800;x.opposite_peak_deg=5;
   x.preset_deg=8;x.side_target_deg=10;x.next_side=1;
   x.wheel_rpm=120;x.battery_mv=8000;x.hardware_healthy=true;x.speed_fresh=true;
-  x.normal_valid=true;x.normal_motion_aligned=true;x.normal_ma=400;
-  x.normal_width_ms=100;x.normal_cap_ms=100;x.hardware_cap_ms=150;
+  x.normal_valid=true;x.normal_motion_aligned=true;x.normal_ma=300;
+  x.normal_width_ms=40;x.normal_cap_ms=100;x.hardware_cap_ms=150;
   return x;
 }
-static void normalCycle(Controller& c,Input& x,float result) {
+static void normalCycle(Controller& c,Input& x,float pos,float neg) {
   assert(!c.propose(x).selected);
-  c.confirmNormal(x,400,x.normal_width_ms,1,true);
-  c.peak(1,x.now_ms+200,result,true);
-  x.now_ms+=800;x.opposite_peak_ms=x.now_ms-200;
+  c.confirmNormal(x,x.normal_ma,x.normal_width_ms,1,true);
+  c.peak(1,x.now_ms+200,pos,true);
+  c.peak(-1,x.now_ms+600,neg,true);
+  x.now_ms+=800;x.opposite_peak_ms=x.now_ms-200;x.opposite_peak_deg=neg;
 }
 static void baseline(Controller& c,Input& x) {
-  normalCycle(c,x,5.0f);normalCycle(c,x,5.2f);
+  normalCycle(c,x,5.0f,5.0f);normalCycle(c,x,5.2f,5.0f);
   assert(c.baselineCount()==2);
 }
+static void trial(Controller& c,Input& x,int current,int width,float pos,float neg) {
+  const auto b=c.propose(x);
+  assert(b.selected && b.current_ma==current && b.width_ms==width);
+  c.confirmTrial(x,current,width,1,true);
+  assert(c.awaitingPeak());
+  c.peak(1,x.now_ms+200,pos,true);
+  assert(c.awaitingPeak());
+  c.peak(-1,x.now_ms+600,neg,true);
+  x.now_ms+=800;x.opposite_peak_ms=x.now_ms-200;x.opposite_peak_deg=neg;
+}
 int main() {
+  // Every level is reached with an observed larger positive/negative difference.
   { Controller c;auto x=example();baseline(c,x);
-    auto b=c.propose(x);assert(b.selected && b.current_ma==500 && b.width_ms==100);
-    c.confirmTrial(x,500,100,1,true);assert(c.awaitingPeak());
-    // The post-command opposite peak cannot substitute for the positive one.
-    assert(!c.propose(x).selected);
-    c.peak(1,x.now_ms+200,5.5f,true);assert(c.awaitingPeak());
-    x.now_ms+=800;x.opposite_peak_ms=x.now_ms-200;
-    assert(!c.propose(x).selected);
-    c.peak(-1,x.now_ms-200,4.8f,true);assert(c.accepted());
-    b=c.propose(x);assert(b.selected && b.width_ms==125);
-    c.confirmTrial(x,500,125,1,true);c.peak(1,x.now_ms+200,5.7f,true);
-    c.peak(-1,x.now_ms+600,4.8f,true);x.now_ms+=800;x.opposite_peak_ms=x.now_ms-200;
-    b=c.propose(x);assert(b.selected && b.width_ms==150);
-    c.confirmTrial(x,500,150,1,true);c.peak(1,x.now_ms+220,5.8f,true);
-    c.peak(-1,x.now_ms+600,4.9f,true);x.now_ms+=800;x.opposite_peak_ms=x.now_ms-200;
-    b=c.propose(x);assert(b.selected && b.width_ms==150);
+    trial(c,x,500,100,5.6f,5.f);assert(c.accepted());
+    trial(c,x,700,100,5.6f,5.f);assert(c.accepted());
+    trial(c,x,900,100,5.6f,5.f);assert(c.accepted());
+    trial(c,x,1200,100,5.6f,5.f);assert(c.accepted());
+    trial(c,x,1200,125,5.6f,5.f);assert(c.accepted());
+    trial(c,x,1200,150,5.6f,5.f);assert(c.accepted());
+    assert(c.propose(x).width_ms==150);
   }
-  { Controller c;auto x=example();baseline(c,x);assert(c.propose(x).selected);
-    c.confirmTrial(x,500,100,1,true);c.peak(1,x.now_ms+200,5.1f,true);
-    c.peak(-1,x.now_ms+600,5.1f,true);
-    assert(!c.accepted());x.now_ms+=800;x.opposite_peak_ms=x.now_ms-200;
-    assert(!c.propose(x).selected); // no positive improvement: normal fallback
+  // Equal common-mode rises do not count as a one-sided improvement, but
+  // remain inconclusive and can progress to higher levels.
+  { Controller c;auto x=example();baseline(c,x);
+    trial(c,x,500,100,5.6f,5.5f);assert(!c.accepted());
+    trial(c,x,700,100,5.7f,5.6f);assert(!c.accepted());
+    trial(c,x,900,100,5.8f,5.7f);assert(!c.accepted());
+    trial(c,x,1200,100,5.9f,5.8f);assert(!c.accepted());
+    trial(c,x,1200,125,6.0f,5.9f);assert(!c.accepted());
+    trial(c,x,1200,150,6.1f,6.0f);assert(!c.accepted());
+    assert(!c.propose(x).selected); // exhausted: ordinary output resumes
   }
-  { Controller c;auto x=example();baseline(c,x);assert(c.propose(x).selected);
-    c.confirmTrial(x,500,100,1,true);c.peak(1,x.now_ms+200,5.8f,true);
-    c.peak(-1,x.now_ms+600,3.0f,true);
-    assert(!c.accepted());x.now_ms+=800;x.opposite_peak_ms=x.now_ms-200;
-    assert(!c.propose(x).selected); // opposite side badly deteriorated
+  // Worse differential after a good trial returns to the last good level.
+  { Controller c;auto x=example();baseline(c,x);
+    trial(c,x,500,100,5.6f,5.f);assert(c.accepted());
+    trial(c,x,700,100,5.1f,5.1f);assert(c.accepted());
+    auto b=c.propose(x);assert(b.selected&&b.current_ma==500&&b.width_ms==100);
+    trial(c,x,500,100,5.6f,5.f);
+    b=c.propose(x);assert(b.selected&&b.current_ma==500&&b.width_ms==100);
   }
-  { Controller c;auto x=example();baseline(c,x);assert(c.propose(x).width_ms==100);
-    c.confirmTrial(x,500,100,1,true);c.peak(1,x.now_ms+200,5.7f,true);
-    c.peak(-1,x.now_ms+600,4.9f,true);x.now_ms+=800;x.opposite_peak_ms=x.now_ms-200;
-    assert(c.propose(x).width_ms==125);
-    c.confirmTrial(x,500,125,1,true);c.peak(1,x.now_ms+200,5.3f,true);
-    c.peak(-1,x.now_ms+600,4.9f,true);x.now_ms+=800;x.opposite_peak_ms=x.now_ms-200;
-    assert(c.propose(x).width_ms==100); // longer trial worsened: retain last good
-    c.confirmTrial(x,500,100,1,true);c.peak(1,x.now_ms+200,5.7f,true);
-    c.peak(-1,x.now_ms+600,4.9f,true);x.now_ms+=800;x.opposite_peak_ms=x.now_ms-200;
-    assert(c.propose(x).width_ms==100); // no immediate retry of failed 125
+  { Controller c;auto x=example();baseline(c,x);
+    trial(c,x,500,100,5.8f,3.f);assert(!c.accepted());
+    assert(!c.propose(x).selected); // opposite fell markedly: normal fallback
   }
   { Controller c;auto x=example();x.hardware_cap_ms=120;baseline(c,x);
-    assert(c.propose(x).width_ms==100);c.confirmTrial(x,500,100,1,true);
-    c.peak(1,x.now_ms+200,5.6f,true);c.peak(-1,x.now_ms+600,4.9f,true);
-    x.now_ms+=800;x.opposite_peak_ms=x.now_ms-200;assert(c.propose(x).width_ms==120);
-    c.confirmTrial(x,500,120,1,true);c.peak(1,x.now_ms+200,5.7f,true);
-    c.peak(-1,x.now_ms+600,4.9f,true);x.now_ms+=800;x.opposite_peak_ms=x.now_ms-200;
-    assert(c.propose(x).width_ms==120); // physical cap never exceeded
+    trial(c,x,500,100,5.6f,5.f);trial(c,x,700,100,5.6f,5.f);
+    trial(c,x,900,100,5.6f,5.f);trial(c,x,1200,100,5.6f,5.f);
+    trial(c,x,1200,120,5.6f,5.f);assert(c.propose(x).width_ms==120);
   }
-  { Controller c;auto x=example();baseline(c,x);assert(c.propose(x).width_ms==100);
-    c.confirmTrial(x,500,100,1,true);c.peak(1,x.now_ms+200,9.7f,true);
-    c.peak(-1,x.now_ms+600,4.9f,true);x.now_ms+=800;x.opposite_peak_ms=x.now_ms-200;
-    assert(!c.propose(x).selected); // no boost once target has been reached
+  { Controller c;auto x=example();baseline(c,x);
+    trial(c,x,500,100,9.7f,5.f);assert(c.accepted());
+    assert(!c.propose(x).selected); // side target reached
+  }
+  { Controller c;auto x=example();baseline(c,x);
+    trial(c,x,500,100,9.7f,9.6f);assert(!c.accepted());
+    assert(!c.propose(x).selected); // shared rise at target is inconclusive
+  }
+  { Controller c;auto x=example();baseline(c,x);
+    trial(c,x,500,100,7.f,8.1f);assert(!c.accepted());
+    assert(!c.propose(x).selected); // opposite side reached its nominal target
   }
   { Controller c;auto x=example();baseline(c,x);assert(c.propose(x).selected);
-    c.confirmTrial(x,500,100,1,false);assert(!c.awaitingPeak() && !c.accepted());
+    c.confirmTrial(x,500,100,1,false);assert(!c.awaitingPeak()&&!c.accepted());
     c.peak(1,x.now_ms+200,7,true);assert(c.baselineCount()==0);
-    assert(!c.propose(x).selected); // failed send contributes no evidence
   }
   { Controller c;auto x=example();baseline(c,x);assert(c.propose(x).selected);
-    c.confirmTrial(x,400,100,1,true);assert(!c.awaitingPeak()&&!c.accepted());
+    c.confirmTrial(x,700,100,1,true);assert(!c.awaitingPeak());
   }
   { Controller c;auto x=example();baseline(c,x);assert(c.propose(x).selected);
-    c.confirmTrial(x,500,100,-1,true);assert(!c.awaitingPeak()&&!c.accepted());
+    c.confirmTrial(x,500,100,-1,true);assert(!c.awaitingPeak());
   }
-  { Controller c;auto x=example();c.confirmNormal(x,400,100,1,false);
-    c.peak(1,x.now_ms+200,4,true);assert(c.baselineCount()==0);
-    c.confirmNormal(x,400,95,1,true);c.peak(1,x.now_ms+200,4,true);
-    assert(c.baselineCount()==0); // actual width must match normal candidate
+  { Controller c;auto x=example();c.confirmNormal(x,300,40,1,true);
+    c.peak(1,x.now_ms+200,5,true);assert(c.baselineCount()==0 && c.awaitingPeak());
+    c.peak(-1,x.now_ms+600,5,true);assert(c.baselineCount()==1);
+  }
+  { Controller c;auto x=example();c.confirmNormal(x,300,40,1,true);
+    c.peak(1,x.now_ms+20,5,true);assert(c.baselineCount()==0&&!c.awaitingPeak());
   }
   { Controller c;auto x=example();baseline(c,x);x.hardware_healthy=false;
-    assert(!c.propose(x).selected);x.hardware_healthy=true;
-    assert(!c.propose(x).selected); // reacquire two real peaks after interruption
+    assert(!c.propose(x).selected);x.hardware_healthy=true;assert(!c.propose(x).selected);
   }
   { Controller c;auto x=example();baseline(c,x);x.speed_fresh=false;assert(!c.propose(x).selected); }
   { Controller c;auto x=example();baseline(c,x);x.wheel_rpm=NAN;assert(!c.propose(x).selected); }
   { Controller c;auto x=example();baseline(c,x);x.battery_mv=0;assert(!c.propose(x).selected); }
   { Controller c;auto x=example();baseline(c,x);x.opposite_peak_ms=x.now_ms-1501;assert(!c.propose(x).selected); }
-  { Controller c;auto x=example();baseline(c,x);x.normal_width_ms=90;assert(!c.propose(x).selected); }
   { Controller c;auto x=example();baseline(c,x);x.hardware_cap_ms=99;assert(!c.propose(x).selected); }
   { Controller c;auto x=example();baseline(c,x);x.normal_motion_aligned=false;assert(!c.propose(x).selected); }
-  { Controller c;auto x=example();baseline(c,x);x.side_target_deg=9.5f;assert(!c.propose(x).selected); }
   { Controller c;auto x=example();baseline(c,x);x.normal_valid=false;assert(!c.propose(x).selected); }
-  { Controller c;auto x=example();baseline(c,x);x.wheel_rpm+=101;assert(!c.propose(x).selected); }
-  { Controller c;auto x=example();baseline(c,x);x.opposite_peak_deg+=.81f;assert(!c.propose(x).selected); }
-  { Controller c;auto x=example();c.confirmNormal(x,400,100,1,true);
-    c.peak(1,x.now_ms+40,5,true);assert(c.baselineCount()==0&&!c.awaitingPeak()); }
   { Controller c;auto x=example();baseline(c,x);assert(c.propose(x).selected);
     c.confirmTrial(x,500,100,1,true);c.peak(1,x.now_ms+200,5.5f,true);
-    c.peak(-1,x.now_ms+600,4.9f,false);assert(!c.accepted()); }
+    c.peak(-1,x.now_ms+600,4.9f,false);assert(!c.accepted());
+  }
   { Controller c;auto x=example();baseline(c,x);assert(c.propose(x).selected);
     c.confirmTrial(x,500,100,1,true);x.now_ms+=1801;x.opposite_peak_ms=x.now_ms-200;
-    assert(!c.propose(x).selected && !c.awaitingPeak()); }
+    assert(!c.propose(x).selected&&!c.awaitingPeak());
+  }
   { Controller c;auto x=example();baseline(c,x);assert(c.propose(x).selected);
     c.confirmTrial(x,500,100,1,true);c.peak(1,x.now_ms+200,16.f,true);
-    assert(!c.awaitingPeak() && !c.accepted()); }
-  std::cout<<"positive left boost: matched 400 baseline, one 500 trial, feedback and guards PASS\n";
+    assert(!c.awaitingPeak()&&!c.accepted());
+  }
+  std::cout<<"paired peak contrast and exploratory 1200mA/150ms levels PASS\n";
 }

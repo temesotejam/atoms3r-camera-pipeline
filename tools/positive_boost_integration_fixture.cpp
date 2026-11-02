@@ -92,17 +92,17 @@ static void normalCycle(ExperimentRunner& r,uint32_t now,float peak) {
   // Drive the actual production confirmation statement using the event
   // that the ordinary motor path would have recorded on a successful send.
   e.valid=true;e.output_executed=true;e.command_current_mA=400;e.pulse_width_ms=100;e.q_command_direction=1;
-  r.normalConfirmation(e,now);r.feedPeak(1,now+200,peak,true);
+  r.normalConfirmation(e,now);r.feedPeak(1,now+200,peak,true);r.feedPeak(-1,now+600,5.f,true);
 }
 static void seed(ExperimentRunner& r) {normalCycle(r,1000,5.0f);normalCycle(r,1800,5.2f);}
-static Event trial(ExperimentRunner& r,uint32_t now,uint16_t expected_width,uint16_t cap=150) {
+static Event trial(ExperimentRunner& r,uint32_t now,int expected_ma,uint16_t expected_width,uint16_t cap=150) {
   r.status_.pulse_active=false;Event e=sample(now);auto n=normal();
   assert(r.tryPositiveLeftBoost(e,n,now));
-  assert(e.valid&&e.output_executed&&e.work_control_branch==14&&e.command_current_mA==500);
+  assert(e.valid&&e.output_executed&&e.work_control_branch==14&&e.command_current_mA==expected_ma);
   assert(e.solver_required_width_ms==100&&e.solver_selected_integer_width_ms==expected_width);
   assert(e.pulse_width_ms==expected_width&&e.q_command_direction==1&&e.work_brake_cap_ms==cap);
   assert(e.pulse_start_ms==now&&e.pulse_end_ms==now+expected_width);
-  assert(r.last_now==now+100&&r.last_test==now&&r.last_width==expected_width&&r.last_ma==500&&r.last_sign==1);
+  assert(r.last_now==now+100&&r.last_test==now&&r.last_width==expected_width&&r.last_ma==expected_ma&&r.last_sign==1);
   assert(e.energy_model_extrapolated&&e.work_prediction_cross_condition);
   assert(std::isnan(e.predicted_energy_j)&&std::isnan(e.predicted_next_peak_amplitude_deg)&&
          std::isnan(e.predicted_wheel_work_j)&&std::isnan(e.q_command_mA_s));
@@ -118,29 +118,50 @@ int main() {
    assert(r.energyControlPeakTarget(-1)==8.f);r.energy_control_autonomous_pending_peak_=true;
    r.energy_control_autonomous_pending_next_side_=1;r.energy_control_autonomous_pending_target_deg_=9.f;
    assert(r.energyControlPeakTarget(1)==9.f&&r.energyControlPeakTarget(-1)==8.f);}
-  {ExperimentRunner r;seed(r);trial(r,2600,100);
+  {ExperimentRunner r;seed(r);trial(r,2600,500,100);
    r.status_.pulse_active=false;Event no=sample(2600);assert(!r.tryPositiveLeftBoost(no,normal(),2600));
    r.feedPeak(1,2800,5.5f,true);r.feedPeak(-1,3200,4.8f,true);
-   trial(r,3400,125);r.feedPeak(1,3600,5.7f,true);r.feedPeak(-1,4000,4.8f,true);
-   trial(r,4200,150);r.feedPeak(1,4420,5.8f,true);r.feedPeak(-1,4800,4.9f,true);
-   trial(r,5000,150);}
+   trial(r,3400,700,100);r.feedPeak(1,3600,5.7f,true);r.feedPeak(-1,4000,4.8f,true);
+   trial(r,4200,900,100);r.feedPeak(1,4420,5.8f,true);r.feedPeak(-1,4800,4.9f,true);
+   trial(r,5000,1200,100);r.feedPeak(1,5200,5.9f,true);r.feedPeak(-1,5600,4.9f,true);
+   trial(r,5800,1200,125);r.feedPeak(1,6000,6.f,true);r.feedPeak(-1,6400,4.9f,true);
+   trial(r,6600,1200,150);}
+  // Equal increases on both sides must not be reported as asymmetric progress;
+  // the next current level may still be tried rather than stopping walking.
+  {ExperimentRunner r;seed(r);trial(r,2600,500,100);r.feedPeak(1,2800,6.f,true);
+   r.feedPeak(-1,3200,5.9f,true);assert(!r.positive_left_boost_.accepted());
+   trial(r,3400,700,100);}
+  // When both peaks increase together up to the target, do not escalate
+  // further; resume the ordinary walking path without an emergency stop.
+  {ExperimentRunner r;seed(r);trial(r,2600,500,100);r.feedPeak(1,2800,9.6f,true);
+   r.feedPeak(-1,3200,9.5f,true);assert(!r.positive_left_boost_.accepted());
+   r.status_.pulse_active=false;Event e=sample(3400);
+   assert(!r.tryPositiveLeftBoost(e,normal(),3400)&&!r.status_.emergency_stop);}
+  {ExperimentRunner r;seed(r);trial(r,2600,500,100);r.feedPeak(1,2800,9.f,true);
+   r.feedPeak(-1,3200,8.1f,true);r.status_.pulse_active=false;Event e=sample(3400);
+   assert(!r.tryPositiveLeftBoost(e,normal(),3400)&&!r.status_.emergency_stop);}
+  {ExperimentRunner r;seed(r);Event e=sample(2600);e.previous_peak_amplitude_deg=8.f;
+   assert(!r.tryPositiveLeftBoost(e,normal(),2600)&&!r.calls&&!r.status_.emergency_stop);}
   {ExperimentRunner r;seed(r);r.begin_ok=false;Event e=sample(2600);
    assert(r.tryPositiveLeftBoost(e,normal(),2600));
    assert(e.work_control_branch==14&&!e.valid&&!e.output_executed&&e.reason==12&&e.pulse_width_ms==0);
    assert(e.solver_selected_integer_width_ms==100&&!r.energy_control_autonomous_pending_peak_);
    r.feedPeak(1,2800,8,true);r.feedPeak(-1,3200,5,true);r.begin_ok=true;
    Event after=sample(3400);assert(!r.tryPositiveLeftBoost(after,normal(),3400));}
-  {ExperimentRunner r;seed(r);trial(r,2600,100);r.feedPeak(1,2800,5.1f,true);
-   r.feedPeak(-1,3200,5,true);r.status_.pulse_active=false;Event e=sample(3400);
+  {ExperimentRunner r;seed(r);trial(r,2600,500,100);r.feedPeak(1,2800,4.4f,true);
+   r.feedPeak(-1,3200,5.4f,true);r.status_.pulse_active=false;Event e=sample(3400);
    assert(!r.tryPositiveLeftBoost(e,normal(),3400));}
-  {ExperimentRunner r;seed(r);trial(r,2600,100);r.feedPeak(1,2800,5.5f,true);
+  {ExperimentRunner r;seed(r);trial(r,2600,500,100);r.feedPeak(1,2800,5.5f,true);
    r.feedPeak(-1,3200,3.0f,true);r.status_.pulse_active=false;Event e=sample(3400);
    assert(!r.tryPositiveLeftBoost(e,normal(),3400));}
-  {ExperimentRunner r;seed(r);trial(r,2600,100);r.feedPeak(1,2800,5.5f,false);
+  {ExperimentRunner r;seed(r);trial(r,2600,500,100);r.feedPeak(1,2800,5.5f,false);
    r.status_.pulse_active=false;Event e=sample(3400);assert(!r.tryPositiveLeftBoost(e,normal(),3400));}
-  {Config::WALKING_TARGET8_MAX_PULSE_MS=120;ExperimentRunner r;seed(r);trial(r,2600,100,120);
+  {Config::WALKING_TARGET8_MAX_PULSE_MS=120;ExperimentRunner r;seed(r);trial(r,2600,500,100,120);
    r.feedPeak(1,2800,5.5f,true);r.feedPeak(-1,3200,4.8f,true);
-   trial(r,3400,120,120);Config::WALKING_TARGET8_MAX_PULSE_MS=150;}
+   trial(r,3400,700,100,120);r.feedPeak(1,3600,5.7f,true);r.feedPeak(-1,4000,4.8f,true);
+   trial(r,4200,900,100,120);r.feedPeak(1,4400,5.8f,true);r.feedPeak(-1,4800,4.8f,true);
+   trial(r,5000,1200,100,120);r.feedPeak(1,5200,5.9f,true);r.feedPeak(-1,5600,4.8f,true);
+   trial(r,5800,1200,120,120);Config::WALKING_TARGET8_MAX_PULSE_MS=150;}
   {ExperimentRunner r;seed(r);r.foot_span_control_.good=false;Event e=sample(2600);
    assert(r.tryPositiveLeftBoost(e,normal(),2600)&&r.emergency&&!r.calls);}
   {ExperimentRunner r;seed(r);r.status_.emergency_stop=true;Event e=sample(2600);
@@ -151,15 +172,19 @@ int main() {
    assert(!r.tryPositiveLeftBoost(e,normal(),2600)&&!r.calls);}
   {ExperimentRunner r;seed(r);Event e=sample(2600);e.pre_input_wheel_speed_valid=false;
    assert(!r.tryPositiveLeftBoost(e,normal(),2600)&&!r.calls);}
+  {ExperimentRunner r;seed(r);Event e=sample(2600);e.pre_input_wheel_speed_age_us=peak_error_adaptation::kMaxSpeedAgeUs+1;
+   assert(!r.tryPositiveLeftBoost(e,normal(),2600)&&!r.calls);}
+  {ExperimentRunner r;seed(r);Event e=sample(2600);e.side_mismatch_diagnostic=true;
+   assert(!r.tryPositiveLeftBoost(e,normal(),2600)&&!r.calls);}
   {ExperimentRunner r;seed(r);Event e=sample(2600);e.previous_peak_time_ms=1000;
    assert(!r.tryPositiveLeftBoost(e,normal(),2600)&&!r.calls);}
   {ExperimentRunner r;seed(r);Event e=sample(2600);auto n=normal();n.allowed_cap_ms=90;
    assert(!r.tryPositiveLeftBoost(e,n,2600)&&!r.calls);}
   {ExperimentRunner r;seed(r);Event e=sample(2600);auto n=normal();n.current_ma=350;
-   assert(!r.tryPositiveLeftBoost(e,n,2600)&&!r.calls);}
+   assert(r.tryPositiveLeftBoost(e,n,2600)&&r.last_ma==500);}
   {ExperimentRunner r;seed(r);Event e=sample(2600);auto n=normal();n.command_sign=-1;
    assert(!r.tryPositiveLeftBoost(e,n,2600)&&!r.calls);}
   {ExperimentRunner r;seed(r);Event e=sample(2600);e.foot_balance_target_deg=9.5;
-   assert(!r.tryPositiveLeftBoost(e,normal(),2600)&&!r.calls);}
+   assert(r.tryPositiveLeftBoost(e,normal(),2600)&&r.last_ma==500);}
   std::cout<<"actual runner positive boost with hardware doubles PASS\n";
 }

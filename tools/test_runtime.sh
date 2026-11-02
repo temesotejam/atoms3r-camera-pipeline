@@ -8,6 +8,7 @@ g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_weak_side_assist.cpp -
 python3 tools/test_weak_assist_integration.py
 python3 tools/test_side_target_integration.py
 python3 tools/test_positive_boost_integration.py
+python3 tools/test_walking_pulse_limits.py
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_positive_left_boost.cpp -o /tmp/test_positive_left_boost
 /tmp/test_positive_left_boost
 

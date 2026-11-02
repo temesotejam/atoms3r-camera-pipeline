@@ -1130,7 +1130,7 @@ bool ExperimentRunner::startEnergyControlAutonomousCapture() {
   if (!imu_->ok()) { status_.last_error = "imu_not_ready"; return false; }
   if (wheelWorkMode() && energy_control_autonomous_target_peak_deg_==8.f &&
       energy_control_autonomous_input_current_mA_>Config::WALKING_TARGET8_MAX_CURRENT_MA) {
-    status_.last_error = "walking_current_exceeds_500mA"; return false;
+    status_.last_error = "walking_current_exceeds_1200mA"; return false;
   }
   // ESTOP must be cleared through the existing explicit reset path first.
   if (status_.state != ExperimentState::READY_TO_MEASURE && status_.state != ExperimentState::FINISHED) {
