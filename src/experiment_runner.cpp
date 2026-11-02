@@ -21,6 +21,7 @@
 #include "one_peak_energy_inverse.h"
 #include "wheel_work_energy_control.h"
 #include "unmodeled_walk_coast.h"
+#include "foot_span_candidate.h"
 #include "walking_positive_cap.h"
 #include "peak_mpc.h"
 
@@ -3424,8 +3425,8 @@ wheel_work_energy_control::Choice ExperimentRunner::chooseFootPhaseWidth(
   using namespace wheel_work_energy_control;
   Choice c;
   const int16_t ma=baseline.current_ma;
-  if(!baseline.valid || baseline.branch!=5 || (ma!=300 && ma!=350 && ma!=400) || baseline.command_sign!=1 ||
-     width<10 || width>baseline.allowed_cap_ms || width>100 ||
+  if(!baseline.valid || !foot_span_candidate::supportedBranch(baseline.branch) ||
+     !foot_span_candidate::supportedCurrent(ma) || baseline.command_sign!=1 ||
      !std::isfinite(event.target_energy_j) || event.target_energy_j<=0.f)return c;
   State state{event.zero_cross_abs_rate_dps,event.pre_input_wheel_speed_rpm,
       static_cast<float>(event.vbat_mV),
@@ -3435,15 +3436,13 @@ wheel_work_energy_control::Choice ExperimentRunner::chooseFootPhaseWidth(
   const lateral_energy::CurrentTable& table=ma==300 ? lateral_current_table_ :
       ma==350 ? positive_current_probe_tables_[0] : positive_current_probe_tables_[1];
   const float goal=predictCurrentGoalMa(ma,fast_v);
-  const float q=lateral_energy::charge(table,width,event.i0_estimated_mA,goal);
-  if(!std::isfinite(q) || q<0.f || q>25.f)return c;
-  const auto p=positiveBoundary(lateral_energy_geometry_,state,q,0.f,baseline.applied_bias_mj);
-  if(!p.valid || p.branch!=5)return c;
-  consider(c,ma,width,q,p,event.target_energy_j*1000.f);
-  c.allowed_cap_ms=width;
-  c.minimum_mj=baseline.minimum_mj;c.maximum_mj=p.energy_mj;
-  finish(c,event.target_energy_j*1000.f);
-  return c;
+  // Match exactly the two biases used by chooseWheelWork. In the blended
+  // branch a single already-blended bias cannot reconstruct both sources.
+  const float work_bias=work_positive_feedback_[1].positiveBiasMj(run_cg_shift_mm_,
+      adaptive_cg_.snapshot().common_bias_mj,event.target_peak_deg);
+  const float bridge_bias=work_positive_feedback_[0].positiveBiasMj(run_cg_shift_mm_,0.f,event.target_peak_deg);
+  return foot_span_candidate::choose(lateral_energy_geometry_,state,baseline,table,width,
+      event.i0_estimated_mA,goal,event.target_energy_j*1000.f,work_bias,bridge_bias);
 }
 
 bool ExperimentRunner::prepareUnmodeledWalkCoast(
@@ -3477,7 +3476,7 @@ bool ExperimentRunner::selectFootPhaseOutput(
         event.vbat_mV>0 && !event.side_mismatch_diagnostic && !status_.emergency_stop &&
         status_.state==ExperimentState::RUNNING_BATCH_SWEEP && roller_ && roller_->ok() &&
         imu_ && imu_->acquisitionHealthy() && !imu_->stale(millis());
-    const bool selector_eligible=work_choice.valid && work_choice.branch==5 && work_choice.command_sign==1 &&
+    const bool selector_eligible=work_choice.valid && foot_span_candidate::supportedBranch(work_choice.branch) && work_choice.command_sign==1 &&
         (work_choice.current_ma==300 || work_choice.current_ma==350 || work_choice.current_ma==400);
     if(!phase_sensors_fresh) {
       // A real stale/missing sensor or hardware fault is not model coverage.

@@ -4,6 +4,8 @@ python3 tools/embed_runtime_web.py --check
 
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_fullstride_observer.cpp -o /tmp/test_foot_fullstride_observer
 /tmp/test_foot_fullstride_observer
+g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_span_candidate.cpp -o /tmp/test_foot_span_candidate
+/tmp/test_foot_span_candidate
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_span_control.cpp -o /tmp/test_foot_span_control
 /tmp/test_foot_span_control
 
