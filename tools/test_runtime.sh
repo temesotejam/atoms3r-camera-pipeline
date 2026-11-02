@@ -2,6 +2,11 @@
 set -euo pipefail
 python3 tools/embed_runtime_web.py --check
 
+g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_fullstride_observer.cpp -o /tmp/test_foot_fullstride_observer
+/tmp/test_foot_fullstride_observer
+g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_span_control.cpp -o /tmp/test_foot_span_control
+/tmp/test_foot_span_control
+
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_stroke_observer.cpp -o /tmp/test_foot_stroke_observer
 /tmp/test_foot_stroke_observer
 

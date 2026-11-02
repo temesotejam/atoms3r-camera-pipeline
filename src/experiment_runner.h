@@ -19,6 +19,8 @@
 #include "foot_energy_balance.h"
 #include "foot_phase_observer.h"
 #include "foot_phase_cap.h"
+#include "foot_fullstride_observer.h"
+#include "foot_span_control.h"
 #include "target12_state_work.h"
 #include "peak_error_adaptation.h"
 #include "upright_reference.h"
@@ -157,13 +159,23 @@ private:
   foot_energy_balance::Controller foot_energy_;
   foot_phase_observer::Observer foot_phase_observer_;
   foot_phase_cap::Controller foot_phase_cap_;
+  foot_fullstride_observer::Observer foot_span_observer_;
+  foot_span_control::Controller foot_span_control_;
   struct PhaseNegativePeak { uint32_t ms=0; float amplitude=NAN; };
   struct PhaseNegativeDecision { uint32_t ms=0; foot_phase_cap::NegativeDecision value; };
+  struct SpanPositiveDecision {
+    uint32_t ms=0; uint16_t width=0; int16_t ma=0; int8_t sign=0;
+    float target_mj=NAN; bool executed=false;
+  };
   PhaseNegativePeak phase_negative_peaks_[8];
   PhaseNegativeDecision phase_negative_decisions_[8];
+  SpanPositiveDecision span_positive_decisions_[8];
   unsigned phase_negative_peak_next_=0,phase_negative_decision_next_=0;
   uint32_t phase_observer_sequence_=0;
+  unsigned span_positive_decision_next_=0;
+  uint32_t span_observer_sequence_=0;
   void __attribute__((noinline)) processFootPhaseCycle(uint32_t now_ms);
+  void __attribute__((noinline)) processFootSpanCycle();
   void __attribute__((noinline)) recordFootPhasePeak(int8_t physical_side,uint32_t peak_ms,float amplitude_deg);
   wheel_speed_balance::Controller wheel_speed_balance_;
   uint16_t foot_frame_run_id_=0;

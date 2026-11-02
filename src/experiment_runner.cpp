@@ -2536,6 +2536,9 @@ void ExperimentRunner::resetEnergyControlAutonomous() {
   work_walking_pending_=false;work_walking_low_pending_=false;
   foot_balance_.reset(status_.run_id);foot_energy_.reset(status_.run_id);wheel_speed_balance_.reset();gradual_start_.reset();foot_frame_run_id_=0;
   foot_phase_observer_.reset(status_.run_id);foot_phase_cap_.reset();phase_observer_sequence_=0;
+  foot_span_observer_.reset(status_.run_id);foot_span_control_.reset();span_observer_sequence_=0;
+  span_positive_decision_next_=0;
+  for (auto& x:span_positive_decisions_) x=SpanPositiveDecision{};
   phase_negative_peak_next_=phase_negative_decision_next_=0;
   for (auto& x:phase_negative_peaks_) x=PhaseNegativePeak{};
   for (auto& x:phase_negative_decisions_) x=PhaseNegativeDecision{};
@@ -2859,23 +2862,68 @@ void ExperimentRunner::observeFootFrame(uint16_t run_id,uint32_t frame_ms,bool l
   foot_energy_.frame(run_id,frame_ms,left_valid && std::isfinite(left_px),right_valid && std::isfinite(right_px),left_px,right_px);
   if(wheelWorkMode() && energy_control_autonomous_target_peak_deg_==8.f) {
     foot_phase_observer_.rawFrame(run_id,frame_ms,phase_left_detected,phase_right_detected,phase_left_x,phase_right_x);
+    // Fixed-reference calibrated camera-relative angles avoid the optional
+    // boot zero; raw detection and finite pixels remain independently required.
+    const bool lv=phase_left_detected && std::isfinite(phase_left_x);
+    const bool rv=phase_right_detected && std::isfinite(phase_right_x);
+    const float l=lv ? foot_phase_observer::Observer::fixedAngle(foot_calibration::left,phase_left_x,appcfg::kFootAngleBZeroXPx) : NAN;
+    const float r=rv ? foot_phase_observer::Observer::fixedAngle(foot_calibration::right,phase_right_x,appcfg::kFootAngleAZeroXPx) : NAN;
+    foot_span_observer_.frame(run_id,frame_ms,lv,rv,l,r);
     processFootPhaseCycle(frame_ms);
+    processFootSpanCycle();
   }
 }
 void ExperimentRunner::processFootPhaseCycle(uint32_t now_ms) {
+  (void)now_ms;
   const uint32_t seq=foot_phase_observer_.sequence();
   if(seq==phase_observer_sequence_)return;
   phase_observer_sequence_=seq;
-  const uint32_t start=foot_phase_observer_.cycleStart(),end=foot_phase_observer_.cycleTime();
+  // The previous signed phase metric remains available as a diagnostic only;
+  // it never concurrently adjusts the positive-side motor output.
+}
+void ExperimentRunner::processFootSpanCycle() {
+  const auto& span=foot_span_observer_.latest();
+  if(span.sequence==span_observer_sequence_)return;
+  span_observer_sequence_=span.sequence;
   const PhaseNegativePeak* peak=nullptr;
-  const PhaseNegativeDecision* decision=nullptr;
-  unsigned decisions=0;
-  for(const auto& p:phase_negative_peaks_) if(p.ms==end && p.ms)peak=&p;
-  for(const auto& d:phase_negative_decisions_) if(d.ms>start && d.ms<end) {decision=&d;++decisions;}
-  const auto negative=decisions==1 && decision ? decision->value : foot_phase_cap::NegativeDecision{};
-  foot_phase_cap_.pair(end,start,foot_phase_observer_.leftLatest(),foot_phase_observer_.rightLatest(),
-      peak ? peak->amplitude : NAN,negative,
-      peak && foot_phase_observer_.valid(now_ms));
+  const PhaseNegativeDecision* negative=nullptr;
+  const SpanPositiveDecision* positive=nullptr;
+  unsigned negatives=0,positives=0;
+  for(const auto& p:phase_negative_peaks_) if(p.ms && p.ms==span.end_ms)peak=&p;
+  for(const auto& d:phase_negative_decisions_) if(d.ms>span.start_ms && d.ms<span.end_ms) {negative=&d;++negatives;}
+  for(const auto& d:span_positive_decisions_) if(d.ms>span.start_ms && d.ms<span.end_ms) {positive=&d;++positives;}
+  foot_span_control::Cycle cycle;
+  cycle.start_ms=span.start_ms;cycle.end_ms=span.end_ms;
+  cycle.left=span.left.span;cycle.right=span.right.span;
+  cycle.negative_peak=peak ? peak->amplitude : NAN;
+  // Distinct actual negative drive pulses must never be compared as though
+  // their observed response came from the same motor command. All explicit
+  // valid coasts are equivalent zero command regardless of model coverage.
+  if(negatives==1 && negative) {
+    const auto& n=negative->value;
+    if(n.mode==foot_phase_cap::NegativeMode::Coast || n.mode==foot_phase_cap::NegativeMode::UnmodeledCoast) {
+      cycle.negative_known=true;cycle.negative_key=1;
+    } else if(n.mode==foot_phase_cap::NegativeMode::Powered) {
+      cycle.negative_known=true;
+      cycle.negative_key=0x80000000u | (static_cast<uint32_t>(n.ma)<<16) |
+          (n.sign<0 ? 0x8000u : 0u) | static_cast<uint32_t>(n.width);
+    }
+  }
+  if(positives==1 && positive) {
+    cycle.positive_ms=positive->ms;cycle.positive_width=positive->width;
+    cycle.positive_ma=positive->ma;cycle.positive_sign=positive->sign;
+    cycle.positive_executed=positive->executed;cycle.target_mj=positive->target_mj;
+  }
+  // A small, consistently detected foot is still a measurement, not an
+  // absent foot. Require a reversal for larger motion so a monotonic drift
+  // alone cannot masquerade as a complete full-cycle stroke.
+  const bool left_shape=span.left.both_directions || span.left.low_signal;
+  const bool right_shape=span.right.both_directions || span.right.low_signal;
+  cycle.complete=span.valid && span.continuous && left_shape && right_shape &&
+      !span.left.single_outlier && !span.right.single_outlier &&
+      !span.left.edge_unverified && !span.right.edge_unverified &&
+      positives==1 && negatives==1 && peak;
+  foot_span_control_.cycle(cycle);
 }
 void ExperimentRunner::recordFootPhasePeak(int8_t physical_side,uint32_t peak_ms,float amplitude_deg) {
   foot_balance_.peak(physical_side,peak_ms);
@@ -2886,7 +2934,9 @@ void ExperimentRunner::recordFootPhasePeak(int8_t physical_side,uint32_t peak_ms
     phase_negative_peak_next_=(phase_negative_peak_next_+1)%8;
   }
   foot_phase_observer_.peak(status_.run_id,physical_side,peak_ms);
+  foot_span_observer_.peak(status_.run_id,physical_side,peak_ms);
   processFootPhaseCycle(millis()-run_start_ms_);
+  processFootSpanCycle();
 }
 bool ExperimentRunner::recordEnergyControlAutonomousPeak(uint32_t peak_ms, int8_t physical_side,
                                                             float amplitude_deg, float detector_peak_angle_deg) {
@@ -3373,20 +3423,23 @@ wheel_work_energy_control::Choice ExperimentRunner::chooseFootPhaseWidth(
     const wheel_work_energy_control::Choice& baseline,uint16_t width,float fast_v) const {
   using namespace wheel_work_energy_control;
   Choice c;
-  if(!baseline.valid || baseline.branch!=5 || baseline.current_ma!=400 || baseline.command_sign!=1 ||
-     width<10 || width>baseline.allowed_cap_ms || width>baseline.width_ms ||
+  const int16_t ma=baseline.current_ma;
+  if(!baseline.valid || baseline.branch!=5 || (ma!=300 && ma!=350 && ma!=400) || baseline.command_sign!=1 ||
+     width<10 || width>baseline.allowed_cap_ms || width>100 ||
      !std::isfinite(event.target_energy_j) || event.target_energy_j<=0.f)return c;
   State state{event.zero_cross_abs_rate_dps,event.pre_input_wheel_speed_rpm,
       static_cast<float>(event.vbat_mV),
       peak_error_adaptation::speedUsable(event.pre_input_wheel_speed_rpm,event.pre_input_wheel_speed_valid,
           event.pre_input_wheel_speed_age_us),event.previous_peak_amplitude_deg};
   state.absolute_reference=true;state.target_deg=event.target_peak_deg;
-  const float goal=predictCurrentGoalMa(400,fast_v);
-  const float q=lateral_energy::charge(positive_current_probe_tables_[1],width,event.i0_estimated_mA,goal);
+  const lateral_energy::CurrentTable& table=ma==300 ? lateral_current_table_ :
+      ma==350 ? positive_current_probe_tables_[0] : positive_current_probe_tables_[1];
+  const float goal=predictCurrentGoalMa(ma,fast_v);
+  const float q=lateral_energy::charge(table,width,event.i0_estimated_mA,goal);
   if(!std::isfinite(q) || q<0.f || q>25.f)return c;
   const auto p=positiveBoundary(lateral_energy_geometry_,state,q,0.f,baseline.applied_bias_mj);
   if(!p.valid || p.branch!=5)return c;
-  consider(c,400,width,q,p,event.target_energy_j*1000.f);
+  consider(c,ma,width,q,p,event.target_energy_j*1000.f);
   c.allowed_cap_ms=width;
   c.minimum_mj=baseline.minimum_mj;c.maximum_mj=p.energy_mj;
   finish(c,event.target_energy_j*1000.f);
@@ -3418,33 +3471,50 @@ bool ExperimentRunner::selectFootPhaseOutput(
     const lateral_energy::CurrentTable*& selected_current_table) {
   bool phase_skip_output=false;
   if(wheelWorkMode() && event.target_peak_deg==8.f && event.physical_next_peak_side>0) {
-    foot_phase_cap_.tick(t_test_ms);
-    event.foot_phase_baseline_ms=work_choice.valid ? work_choice.width_ms : 0;
-    const auto phase_state=foot_phase_cap_.state();
-    const bool intervention=phase_state==foot_phase_cap::State::Trial ||
-        phase_state==foot_phase_cap::State::Hold || phase_state==foot_phase_cap::State::Release;
+    event.foot_span_baseline_ms=work_choice.valid ? work_choice.width_ms : 0;
     const bool phase_sensors_fresh=peak_error_adaptation::speedUsable(event.pre_input_wheel_speed_rpm,
         event.pre_input_wheel_speed_valid,event.pre_input_wheel_speed_age_us) &&
-        event.vbat_mV>=7000 && event.vbat_mV<=8120;
-    if(!work_choice.valid || work_choice.branch!=5 || !phase_sensors_fresh) {
-      if(intervention) {foot_phase_cap_.modeChanged();phase_skip_output=true;}
-      else foot_phase_cap_.limit(t_test_ms,event.foot_phase_baseline_ms,
+        event.vbat_mV>0 && !event.side_mismatch_diagnostic && !status_.emergency_stop &&
+        status_.state==ExperimentState::RUNNING_BATCH_SWEEP && roller_ && roller_->ok() &&
+        imu_ && imu_->acquisitionHealthy() && !imu_->stale(millis());
+    const bool selector_eligible=work_choice.valid && work_choice.branch==5 && work_choice.command_sign==1 &&
+        (work_choice.current_ma==300 || work_choice.current_ma==350 || work_choice.current_ma==400);
+    if(!phase_sensors_fresh) {
+      // A real stale/missing sensor or hardware fault is not model coverage.
+      // Suppress this crossing explicitly, irrespective of selector fallback.
+      (void)foot_span_control_.limit(t_test_ms,event.foot_span_baseline_ms,
           work_choice.current_ma,work_choice.command_sign,work_choice.allowed_cap_ms,false,event.target_energy_j*1000.f);
-    } else {
-      const uint16_t limited=foot_phase_cap_.limit(t_test_ms,work_choice.width_ms,work_choice.current_ma,
-          work_choice.command_sign,work_choice.allowed_cap_ms,true,event.target_energy_j*1000.f);
-      event.foot_phase_requested_ms=limited;
-      if(foot_phase_cap_.requireNeutral()) {
-        requestEmergencyStop("foot_phase_cap_unresolved");phase_skip_output=true;
-      } else if(limited==0 && work_choice.width_ms>0) phase_skip_output=true;
-      else if(limited!=work_choice.width_ms) {
-        auto candidate=chooseFootPhaseWidth(event,work_choice,limited,fast_v);
-        if(!candidate.valid) {foot_phase_cap_.modeChanged();phase_skip_output=true;}
-        else {
-          work_choice=candidate;selected_current_mA=400;
-          selected_current_table=&positive_current_probe_tables_[1];
-          event.foot_phase_selected=true;
-        }
+      event.reason=status_.emergency_stop || status_.state!=ExperimentState::RUNNING_BATCH_SWEEP
+          ? Config::ENERGY_CONTROL_AUTONOMOUS_REASON_ESTOP_OR_STATE
+          : (!roller_ || !roller_->ok() ? Config::ENERGY_CONTROL_AUTONOMOUS_REASON_ROLLER_NOT_READY
+                                       : Config::ENERGY_CONTROL_AUTONOMOUS_REASON_NONFINITE_STATE);
+      return true;
+    }
+    if(!selector_eligible) {
+      // An unavailable or different model/selector is not a hardware fault.
+      // Reacquire the baseline without suppressing the ordinary fallback.
+      if(!foot_span_control_.selectorUnavailable(t_test_ms)) {
+        requestEmergencyStop("foot_span_command_unresolved");return true;
+      }
+      return false;
+    }
+    const uint16_t limited=foot_span_control_.limit(t_test_ms,event.foot_span_baseline_ms,
+        work_choice.current_ma,work_choice.command_sign,work_choice.allowed_cap_ms,true,event.target_energy_j*1000.f);
+    event.foot_span_requested_ms=limited;
+    if(foot_span_control_.requireNeutral()) {
+      requestEmergencyStop("foot_span_command_unresolved");phase_skip_output=true;
+    } else if(limited==0 && work_choice.width_ms>0) phase_skip_output=true;
+    else if(limited!=work_choice.width_ms) {
+      auto candidate=chooseFootPhaseWidth(event,work_choice,limited,fast_v);
+      if(!candidate.valid) {
+        // A candidate that was never sent is not an actuator fault. The
+        // ordinary selector remains in effect if a safe return is possible.
+        if(!foot_span_control_.cancelUnsent(work_choice.width_ms)) phase_skip_output=true;
+      } else {
+        work_choice=candidate;selected_current_mA=candidate.current_ma;
+        selected_current_table=candidate.current_ma==350 ? &positive_current_probe_tables_[0] :
+            candidate.current_ma==400 ? &positive_current_probe_tables_[1] : &lateral_current_table_;
+        event.foot_span_selected=true;
       }
     }
   }
@@ -3523,7 +3593,6 @@ void ExperimentRunner::finishFootEnergyDecision(PsramLogger::EnergyControlAutono
       (!event.valid || (event.work_control_branch!=10 && event.work_control_branch!=11)))
     walking_low_speed_guard_.interrupt();
   if(wheelWorkMode() && event.target_peak_deg==8.f) {
-    foot_phase_cap_.tick(t_ms);
     if(event.physical_next_peak_side<0) {
       auto& d=phase_negative_decisions_[phase_negative_decision_next_];
       d.ms=t_ms;
@@ -3532,18 +3601,37 @@ void ExperimentRunner::finishFootEnergyDecision(PsramLogger::EnergyControlAutono
           event.reason==Config::ENERGY_CONTROL_AUTONOMOUS_REASON_VALID_NO_OUTPUT,
           event.command_current_mA,event.q_command_direction,event.pulse_width_ms,event.work_control_branch);
       phase_negative_decision_next_=(phase_negative_decision_next_+1)%8;
-      foot_phase_cap_.negativeDecision(t_ms,d.value);
     } else if(event.physical_next_peak_side>0) {
-      foot_phase_cap_.confirm(t_ms,event.output_executed,event.command_current_mA,
+      auto& d=span_positive_decisions_[span_positive_decision_next_];
+      d.ms=t_ms;d.width=event.pulse_width_ms;d.ma=event.command_current_mA;
+      d.sign=event.q_command_direction;d.target_mj=event.target_energy_j*1000.f;
+      d.executed=event.output_executed;
+      span_positive_decision_next_=(span_positive_decision_next_+1)%8;
+      foot_span_control_.confirm(t_ms,event.output_executed,event.command_current_mA,
           event.q_command_direction,event.pulse_width_ms);
     }
-    event.foot_phase_state=static_cast<uint8_t>(foot_phase_cap_.state());
-    event.foot_phase_reason=static_cast<uint8_t>(foot_phase_cap_.reason());
+    // Original signed-phase observation remains in the record for backwards
+    // comparison, but its former motor-output controller is inactive.
+    event.foot_phase_state=0;event.foot_phase_reason=0;
     event.foot_phase_start_ms=foot_phase_observer_.cycleStart();
     event.foot_phase_end_ms=foot_phase_observer_.cycleTime();
     event.foot_phase_left_deg=foot_phase_observer_.leftLatest();
     event.foot_phase_right_deg=foot_phase_observer_.rightLatest();
     event.foot_phase_valid=foot_phase_observer_.valid(t_ms);
+    const auto& span=foot_span_observer_.latest();
+    event.foot_span_left_deg=span.left.span;event.foot_span_right_deg=span.right.span;
+    event.foot_span_trimmed_left_deg=span.left.trimmed_span;event.foot_span_trimmed_right_deg=span.right.trimmed_span;
+    event.foot_span_start_ms=span.start_ms;event.foot_span_end_ms=span.end_ms;
+    event.foot_span_state=static_cast<uint8_t>(foot_span_control_.state());
+    event.foot_span_accepted_cycles=static_cast<uint8_t>(foot_span_control_.acceptedProbeCycles());
+    event.foot_span_startup=span.startup;event.foot_span_continuous=span.continuous;
+    event.foot_span_left_low=span.left.low_signal;event.foot_span_right_low=span.right.low_signal;
+    event.foot_span_left_outlier=span.left.single_outlier;event.foot_span_right_outlier=span.right.single_outlier;
+    event.foot_span_left_edge_unverified=span.left.edge_unverified;event.foot_span_right_edge_unverified=span.right.edge_unverified;
+    event.foot_span_left_both=span.left.both_directions;event.foot_span_right_both=span.right.both_directions;
+    event.foot_span_valid=span.valid && span.continuous && !span.left.single_outlier && !span.right.single_outlier &&
+        !span.left.edge_unverified && !span.right.edge_unverified &&
+        (span.left.both_directions || span.left.low_signal) && (span.right.both_directions || span.right.low_signal);
     const bool supported=event.valid && event.output_executed && event.work_control_branch!=0 &&
       event.command_matches_zero_cross_motion && !event.q_saturated_upper && !event.q_saturated_lower &&
       !event.energy_model_extrapolated && peak_error_adaptation::speedUsable(event.pre_input_wheel_speed_rpm,
@@ -3551,8 +3639,8 @@ void ExperimentRunner::finishFootEnergyDecision(PsramLogger::EnergyControlAutono
     foot_energy_.decision(t_ms,event.physical_next_peak_side,supported,event.q_command_mA_s,
         event.pre_input_wheel_speed_rpm,event.vbat_mV);
     event.foot_energy_phase=foot_energy_.phase();event.foot_energy_reason=foot_energy_.reason();
-    if(foot_phase_cap_.requireNeutral() && !status_.emergency_stop)
-      requestEmergencyStop("foot_phase_cap_unresolved");
+    if(foot_span_control_.requireNeutral() && !status_.emergency_stop)
+      requestEmergencyStop("foot_span_command_unresolved");
   }
   if(wheelWorkMode() && event.target_peak_deg==8.f && event.physical_next_peak_side>0)
     low_peak_feedback_.command(t_ms,event.physical_next_peak_side,event.output_executed,event.command_current_mA,
@@ -3752,8 +3840,9 @@ void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(uint32_t t_test_
   const bool phase_skip_output=work_mode && event.target_peak_deg==8.f && event.physical_next_peak_side>0 &&
       selectFootPhaseOutput(event,t_test_ms,fast_v,work_choice,selected_current_mA,selected_current_table);
   if(phase_skip_output) {
-    event.reason=status_.emergency_stop ? Config::ENERGY_CONTROL_AUTONOMOUS_REASON_ESTOP_OR_STATE :
-        Config::ENERGY_CONTROL_AUTONOMOUS_REASON_WORK_OUTSIDE_SUPPORT;
+    if(event.reason==Config::ENERGY_CONTROL_AUTONOMOUS_REASON_NONE)
+      event.reason=status_.emergency_stop ? Config::ENERGY_CONTROL_AUTONOMOUS_REASON_ESTOP_OR_STATE :
+          Config::ENERGY_CONTROL_AUTONOMOUS_REASON_PULSE_WIDTH_GUARD;
     finishFootEnergyDecision(event,t_test_ms);rearm_for_next_peak();return;
   }
   if(work_mode && event.target_peak_deg!=8.f) choosePeakMpc(event,fast_v,work_choice,selected_current_mA,selected_current_table);
