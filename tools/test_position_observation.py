@@ -13,7 +13,13 @@ allowed={
         # Diagnostic-only reasons added by the authorized work-controller
         # extension. Keep every pre-existing config constant frozen below.
         'static constexpr uint8_t ENERGY_CONTROL_AUTONOMOUS_REASON_WORK_OUTSIDE_SUPPORT = 15;\n',
-        'static constexpr uint8_t ENERGY_CONTROL_AUTONOMOUS_REASON_WORK_PROTECT_OPPOSITE = 16;\n'],
+        'static constexpr uint8_t ENERGY_CONTROL_AUTONOMOUS_REASON_WORK_PROTECT_OPPOSITE = 16;\n',
+        # Explicit 8-degree walking trial constants; the legacy 100ms limit
+        # and every other pre-existing config constant must still match.
+        '// User-selected 8-degree walking experiment limits. Other autonomous modes\n'
+        '// continue using their own previously configured limits.\n'
+        'static constexpr uint16_t WALKING_TARGET8_MAX_PULSE_MS = 150;\n'
+        'static constexpr int16_t WALKING_TARGET8_MAX_CURRENT_MA = 500;\n'],
 }
 unchanged=['src/lateral_energy_control.h','src/peak_error_adaptation.h',
            'src/previous_peak_control_correction.h','src/control_math_cache.h',
