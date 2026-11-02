@@ -2538,7 +2538,7 @@ void ExperimentRunner::resetEnergyControlAutonomous() {
   work_walking_pending_=false;work_walking_low_pending_=false;
   foot_balance_.reset(status_.run_id);foot_energy_.reset(status_.run_id);wheel_speed_balance_.reset();gradual_start_.reset();foot_frame_run_id_=0;
   foot_phase_observer_.reset(status_.run_id);foot_phase_cap_.reset();phase_observer_sequence_=0;
-  foot_span_observer_.reset(status_.run_id);foot_span_control_.reset();span_observer_sequence_=0;
+  foot_span_observer_.reset(status_.run_id);foot_span_control_.reset();weak_side_assist_.reset();span_observer_sequence_=0;
   span_positive_decision_next_=0;
   for (auto& x:span_positive_decisions_) x=SpanPositiveDecision{};
   phase_negative_peak_next_=phase_negative_decision_next_=0;
@@ -3473,7 +3473,7 @@ bool ExperimentRunner::tryWeakSideAssist(
   // unmodeled-coast classifier has already confirmed a healthy finite state.
   if(!wheelWorkMode() || event.physical_next_peak_side!=-1 ||
       (!normal.valid && !unmodeled_coast) ||
-      (normal.valid && normal.width_ms!=0)) return false;
+      (normal.valid && normal.width_ms!=0)) { weak_side_assist_.interrupt(); return false; }
 
   weak_side_assist::Input in;
   in.target_preset_deg=event.target_peak_deg;
@@ -3501,7 +3501,7 @@ bool ExperimentRunner::tryWeakSideAssist(
   in.selector_valid=normal.valid;in.selector_width_ms=normal.width_ms;
   in.hardware_max_width_ms=Config::ENERGY_CONTROL_AUTONOMOUS_MAX_PULSE_MS<70
       ? Config::ENERGY_CONTROL_AUTONOMOUS_MAX_PULSE_MS : 70;
-  const auto assist=weak_side_assist::choose(in);
+  const auto assist=weak_side_assist_.propose(in);
   if(!assist.selected)return false;
 
   // Charge is an actuator-model estimate, not a measured current integral.
@@ -3510,14 +3510,15 @@ bool ExperimentRunner::tryWeakSideAssist(
   const float goal_ma=predictCurrentGoalMa(assist.current_ma,fast_v);
   const float q=lateral_energy::charge(lateral_current_table_,assist.width_ms,initial_ma,goal_ma);
   if(!std::isfinite(q) || q<0.f || q>25.f || assist.width_ms==0 ||
-      assist.width_ms>Config::ENERGY_CONTROL_AUTONOMOUS_MAX_PULSE_MS) return false;
+      assist.width_ms>Config::ENERGY_CONTROL_AUTONOMOUS_MAX_PULSE_MS) { weak_side_assist_.interrupt(); return false; }
 
   // Branch 13 stores planned width separately from actual pulse_width_ms;
   // a failed send retains this proposal but records actual width/current 0.
   event.solver_selected_integer_width_ms=assist.width_ms;
   event.work_control_branch=13;
   event.energy_model_extrapolated=true;event.work_prediction_cross_condition=true;
-  event.work_brake_cap_ms=in.hardware_max_width_ms;
+  event.work_brake_cap_ms=weak_side_assist_.limitMs()<in.hardware_max_width_ms
+      ? weak_side_assist_.limitMs() : in.hardware_max_width_ms;
   event.passive_energy_j=NAN;event.free_next_peak_amplitude_deg=NAN;
   event.predicted_energy_j=NAN;event.predicted_observed_energy_j=NAN;
   event.predicted_next_peak_amplitude_deg=NAN;event.predicted_observed_next_peak_deg=NAN;
@@ -3535,11 +3536,13 @@ bool ExperimentRunner::tryWeakSideAssist(
   const uint32_t now_ms=run_start_ms_+t_test_ms;
   if(!beginEnergyControlAutonomousPulse(now_ms,t_test_ms,event.q_command_direction,
                                         assist.width_ms,assist.current_ma)) {
+    weak_side_assist_.interrupt();
     event.command_current_mA=0;event.pulse_width_ms=0;
     event.pulse_start_ms=0;event.pulse_end_ms=0;
     event.reason=Config::ENERGY_CONTROL_AUTONOMOUS_REASON_CURRENT_WRITE_FAILED;
     return true;
   }
+  weak_side_assist_.confirm(in,assist.width_ms);
   event.valid=true;event.output_executed=true;event.reason=Config::ENERGY_CONTROL_AUTONOMOUS_REASON_NONE;
   // Record the actual command for the matching next physical negative peak,
   // without fabricating an arrival prediction or feeding any fitted model.

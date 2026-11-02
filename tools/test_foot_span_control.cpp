@@ -19,7 +19,8 @@ int main(){
   Controller a;
   assert(command(a,150)==80);a.cycle(cycle(100,3,1,80));
   assert(command(a,250)==80);a.cycle(cycle(200,3,1,80));
-  assert(a.offset()==-10);assert(command(a,350)==70);
+  assert(a.offset()==-10);assert(a.acceptedProbeCycles()==0);assert(command(a,350)==70);
+  assert(a.acceptedProbeCycles()==1); // actual matching command, not proposal
   a.cycle(cycle(300,3,1,70));assert(a.offset()==-10); // overlaps command
   assert(command(a,450)==70);a.cycle(cycle(400,3,1,70,400,2)); // different negative mode
   assert(a.offset()==-20);assert(command(a,550)==60);
@@ -107,15 +108,40 @@ int main(){
   Controller cap;assert(command(cap,150)==80);cap.cycle(cycle(100,1,3,80));
   assert(command(cap,250)==80);cap.cycle(cycle(200,1,3,80));
   assert(cap.limit(350,80,400,1,75,true,1.f)<=75);
-  // Anti-windup: a right-greater-than-left command requesting +10ms while
-  // baseline=cap=80 remains at 80 and the blocked correction does not build
-  // to +20/+30; lifting the cap alone cannot cause a surprise jump.
+  // When the intended +10ms direction is entirely blocked by cap=baseline,
+  // explicitly try -10ms and adapt further only after real feedback. This
+  // is an experiment, not evidence that the opposite direction works.
   Controller windup;assert(command(windup,150,80,400,80)==80);windup.cycle(cycle(100,1,3,80));
   assert(command(windup,250,80,400,80)==80);windup.cycle(cycle(200,1,3,80));
-  assert(windup.offset()==10);assert(command(windup,350,80,400,80)==80);assert(windup.offset()==0 && windup.state()==State::Collect);
-  windup.cycle(cycle(300,1,3,80));assert(command(windup,450,80,400,80)==80);
-  windup.cycle(cycle(400,1,3,80));assert(command(windup,550,80,400,80)==80);
-  assert(windup.offset()==0);assert(command(windup,650,80,400,100)==80);
+  assert(windup.offset()==10 && windup.acceptedProbeCycles()==0);
+  assert(command(windup,350,80,400,80)==70);
+  assert(windup.offset()==-10 && windup.acceptedProbeCycles()==1);
+  windup.cycle(cycle(300,1,3,70));assert(command(windup,450,80,400,80)==70);
+  windup.cycle(cycle(400,1,3,70));assert(command(windup,550,80,400,80)==60);
+  assert(windup.offset()==-20);assert(command(windup,650,80,400,100)==60);
+  // Symmetric lower bound: never ask for a negative pulse; test +10ms.
+  Controller lower;assert(command(lower,150,10,400,80)==10);lower.cycle(cycle(100,3,1,10));
+  assert(command(lower,250,10,400,80)==10);lower.cycle(cycle(200,3,1,10));
+  assert(lower.offset()==-10 && lower.acceptedProbeCycles()==0);
+  assert(command(lower,350,10,400,80)==20 && lower.acceptedProbeCycles()==1);
+  // Partial room applies only the reachable +5ms, and repeated attempts
+  // blocked at that same cap must not count another confirmed change.
+  Controller partial;assert(command(partial,150,80,400,85)==80);partial.cycle(cycle(100,1,3,80));
+  assert(command(partial,250,80,400,85)==80);partial.cycle(cycle(200,1,3,80));
+  assert(command(partial,350,80,400,85)==85 && partial.acceptedProbeCycles()==1);
+  partial.cycle(cycle(300,1,3,85));assert(command(partial,450,80,400,85)==85);
+  partial.cycle(cycle(400,1,3,85));assert(command(partial,550,80,400,85)==85);
+  assert(partial.acceptedProbeCycles()==1);
+  // A cap lowered after an applied offset must be confirmed as a separate
+  // transition. A later blocked proposal can then explore the other side.
+  Controller shrinking;assert(command(shrinking,150)==80);shrinking.cycle(cycle(100,1,3,80));
+  assert(command(shrinking,250)==80);shrinking.cycle(cycle(200,1,3,80));
+  assert(command(shrinking,350)==90 && shrinking.acceptedProbeCycles()==1);
+  assert(command(shrinking,450,80,400,80)==80 && shrinking.acceptedProbeCycles()==2);
+  shrinking.cycle(cycle(300,1,3,90));shrinking.cycle(cycle(400,1,3,80));
+  assert(command(shrinking,550,80,400,80)==80);shrinking.cycle(cycle(500,1,3,80));
+  assert(shrinking.offset()==10);assert(command(shrinking,650,80,400,80)==70);
+  assert(shrinking.acceptedProbeCycles()==3);
   // A hard cap always limits the result even if the normal selector or
   // an offset causes a >10ms change from the previous physical command.
   Controller hard;assert(command(hard,150)==80);hard.cycle(cycle(100,3,1,80));
@@ -184,6 +210,7 @@ int main(){
   assert(command(cancel,250)==80);cancel.cycle(cycle(200,3,1,80));
   assert(cancel.limit(350,80,400,1,100,true,1.f)==70);
   assert(cancel.cancelUnsent(80));cancel.confirm(350,true,400,1,80);assert(!cancel.fault());
+  assert(cancel.acceptedProbeCycles()==0);
   // A cancelled candidate is never treated as a confirmed adaptation or
   // accumulated into a subsequent larger step.
   assert(cancel.offset()==0);assert(command(cancel,450)==80);

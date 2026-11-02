@@ -21,6 +21,7 @@
 #include "foot_phase_cap.h"
 #include "foot_fullstride_observer.h"
 #include "foot_span_control.h"
+#include "weak_side_assist.h"
 #include "target12_state_work.h"
 #include "peak_error_adaptation.h"
 #include "upright_reference.h"
@@ -161,6 +162,7 @@ private:
   foot_phase_cap::Controller foot_phase_cap_;
   foot_fullstride_observer::Observer foot_span_observer_;
   foot_span_control::Controller foot_span_control_;
+  weak_side_assist::Controller weak_side_assist_;
   struct PhaseNegativePeak { uint32_t ms=0; float amplitude=NAN; };
   struct PhaseNegativeDecision { uint32_t ms=0; foot_phase_cap::NegativeDecision value; };
   struct SpanPositiveDecision {

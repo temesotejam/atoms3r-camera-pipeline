@@ -36,6 +36,7 @@ public:
  struct Peak {uint32_t ms=0;float amplitude=NAN;};
  Peak phase_negative_peaks_[8];Status status_;FakeRoller roller_obj;FakeImu imu_obj;FakeRoller* roller_=&roller_obj;FakeImu* imu_=&imu_obj;
  FakeFeedback walking_loss_feedback_,walking_low_speed_guard_,adaptive_cg_;FakeGradual gradual_start_;
+ weak_side_assist::Controller weak_side_assist_;
  lateral_energy::CurrentTable lateral_current_table_;
  float run_cg_shift_mm_=0,pending_cg_shift_mm_=0,pending_target_energy_j_=NAN;
  bool energy_control_autonomous_pending_peak_=false,energy_control_autonomous_pending_probe_=false;
@@ -62,10 +63,10 @@ static void configure(ExperimentRunner& r){r.phase_negative_peaks_[0].ms=20300;r
 int main(){
  using Event=PsramLogger::EnergyControlAutonomousZeroCrossEvent;wheel_work_energy_control::Choice coast;coast.valid=true;coast.width_ms=0;coast.branch=11;
  {ExperimentRunner r;configure(r);Event e;assert(r.tryWeakSideAssist(e,coast,false,21726,7.87f));
-  assert(r.call_count==1&&r.last_sign==-1&&r.last_ma==300&&r.last_width==43&&r.last_test==21726&&r.last_now==21826);
-  assert(e.valid&&e.output_executed&&e.work_control_branch==13&&e.reason==0&&e.pulse_width_ms==43&&e.solver_selected_integer_width_ms==43&&e.work_brake_cap_ms==70);
+  assert(r.call_count==1&&r.last_sign==-1&&r.last_ma==300&&r.last_width==30&&r.last_test==21726&&r.last_now==21826);
+  assert(e.valid&&e.output_executed&&e.work_control_branch==13&&e.reason==0&&e.pulse_width_ms==30&&e.solver_selected_integer_width_ms==30&&e.work_brake_cap_ms==30);
   assert(e.command_current_mA==300&&e.q_command_direction==-1&&e.command_matches_zero_cross_motion&&e.q_command_mA_s>0);
-  assert(e.pulse_start_ms==21726&&e.pulse_end_ms==21769&&e.energy_model_extrapolated&&e.work_prediction_cross_condition);
+  assert(e.pulse_start_ms==21726&&e.pulse_end_ms==21756&&e.energy_model_extrapolated&&e.work_prediction_cross_condition);
   assert(std::isnan(e.predicted_energy_j)&&std::isnan(e.predicted_wheel_work_j));
   assert(r.energy_control_autonomous_pending_peak_&&r.energy_control_autonomous_pending_probe_&&r.energy_control_autonomous_pending_next_side_==-1);
   assert(r.energy_control_autonomous_pending_target_deg_==5.5f&&r.pending_target_energy_j_==e.target_energy_j&&
@@ -81,9 +82,28 @@ int main(){
  {ExperimentRunner r;configure(r);Event e;wheel_work_energy_control::Choice missing;assert(!r.tryWeakSideAssist(e,missing,false,21726,7.87f)&&r.call_count==0);}
  {ExperimentRunner r;configure(r);Event e;wheel_work_energy_control::Choice missing;assert(r.tryWeakSideAssist(e,missing,true,21726,7.87f)&&e.output_executed);}
  {ExperimentRunner r;configure(r);Event e;r.begin_ok=false;assert(r.tryWeakSideAssist(e,coast,false,21726,7.87f));
-  assert(!e.valid&&!e.output_executed&&e.reason==12&&e.pulse_width_ms==0&&e.command_current_mA==0&&e.solver_selected_integer_width_ms==43);
+  assert(!e.valid&&!e.output_executed&&e.reason==12&&e.pulse_width_ms==0&&e.command_current_mA==0&&e.solver_selected_integer_width_ms==30);
   assert(!r.energy_control_autonomous_pending_peak_&&!r.status_.pulse_active);}
  {ExperimentRunner r;configure(r);Event e;r.lateral_current_table_=lateral_energy::CurrentTable{};
   assert(!r.tryWeakSideAssist(e,coast,false,21726,7.87f)&&r.call_count==0);}
+ // Exercise the actual runner method across three negative crossings. The
+ // first two *confirmed* commands are followed by fresh falling peaks under
+ // comparable conditions; the third command must use the new 20ms limit.
+ {ExperimentRunner r;configure(r);Event a;assert(r.tryWeakSideAssist(a,coast,false,21726,7.87f));
+  assert(a.pulse_width_ms==30);r.status_.pulse_active=false;
+  r.phase_negative_peaks_[2].ms=22000;r.phase_negative_peaks_[2].amplitude=3.1f;
+  Event b;b.previous_peak_time_ms=22200;b.zero_cross_time_ms=22520;
+  assert(r.tryWeakSideAssist(b,coast,false,22526,7.87f));assert(b.pulse_width_ms==30);
+  r.status_.pulse_active=false;r.phase_negative_peaks_[3].ms=22800;r.phase_negative_peaks_[3].amplitude=2.8f;
+  Event c;c.previous_peak_time_ms=23000;c.zero_cross_time_ms=23320;
+  assert(r.tryWeakSideAssist(c,coast,false,23326,7.87f));assert(c.pulse_width_ms==20&&c.work_brake_cap_ms==20);}
+ // Intervening ordinary powered output clears the pending response rather
+ // than attributing its next peak to the earlier assist.
+ {ExperimentRunner r;configure(r);Event a;assert(r.tryWeakSideAssist(a,coast,false,21726,7.87f));
+  r.status_.pulse_active=false;auto powered=coast;powered.width_ms=40;Event b;
+  assert(!r.tryWeakSideAssist(b,powered,false,22526,7.87f));
+  r.phase_negative_peaks_[2].ms=22800;r.phase_negative_peaks_[2].amplitude=2.8f;
+  Event c;c.previous_peak_time_ms=23000;assert(r.tryWeakSideAssist(c,coast,false,23326,7.87f));
+  assert(c.pulse_width_ms==30);}
  std::cout<<"actual runner weak-assist method with host doubles PASS\n";
 }

@@ -36,5 +36,43 @@ int main() {
   x.last_negative_peak_ms=x.now_ms-1500;assert(choose(x).selected);
   x.last_positive_peak_deg=16.f;assert(!choose(x).selected);
   x.last_positive_peak_deg=5.f;x.last_negative_peak_deg=NAN;assert(!choose(x).selected);
+  // Feedback updates only from an accepted command to a later, time-matched
+  // peak, with comparable target/opposite peak/speed. It never learns from a
+  // failed send, stale frame or a peak preceding the command.
+  weak_side_assist::Controller ctrl;
+  Input y;y.target_preset_deg=8;y.active_target_deg=8;y.physical_next_side=-1;
+  y.last_negative_peak_deg=4;y.last_negative_peak_ms=900;y.now_ms=1000;
+  y.negative_peak_count=2;y.crossing_rate_dps=30;y.wheel_rpm=300;y.battery_mv=8000;
+  y.last_positive_peak_deg=6;y.hardware_healthy=true;y.speed_fresh=true;
+  y.selector_valid=true;y.selector_width_ms=0;y.hardware_max_width_ms=70;
+  auto c=ctrl.propose(y);assert(c.selected && c.width_ms==30);
+  // Repeated worsening without a confirmed send has no effect.
+  for(int i=0;i<3;i++) {y.now_ms+=800;y.last_negative_peak_ms=y.now_ms-100;
+    y.last_negative_peak_deg-=.3f;ctrl.propose(y);}
+  assert(ctrl.limitMs()==30);
+  for(int i=0;i<2;i++) {
+    c=ctrl.propose(y);ctrl.confirm(y,c.width_ms);
+    y.now_ms+=800;y.last_negative_peak_ms=y.now_ms-100;y.last_negative_peak_deg-=.3f;
+    ctrl.propose(y);
+  }
+  assert(ctrl.limitMs()==20);
+  ctrl.reset();assert(ctrl.limitMs()==30);
+  for(int i=0;i<3;i++) {
+    c=ctrl.propose(y);ctrl.confirm(y,c.width_ms);
+    y.now_ms+=800;y.last_negative_peak_ms=y.now_ms-100;y.last_negative_peak_deg+=.3f;
+    ctrl.propose(y);
+  }
+  assert(ctrl.limitMs()==35);
+  // A missed peak, an unavailable sensor, a reset or a changing target
+  // interrupts evidence and never permanently disables subsequent selection.
+  c=ctrl.propose(y);ctrl.confirm(y,c.width_ms);y.now_ms+=800;
+  ctrl.propose(y);assert(ctrl.limitMs()==35);
+  y.last_negative_peak_ms=y.now_ms-100;
+  c=ctrl.propose(y);ctrl.confirm(y,c.width_ms);y.now_ms+=800;
+  y.last_negative_peak_ms=y.now_ms-100;y.last_negative_peak_deg-=1;y.active_target_deg=7.5;
+  ctrl.propose(y);assert(ctrl.limitMs()==35);
+  c=ctrl.propose(y);ctrl.confirm(y,c.width_ms);ctrl.interrupt();y.hardware_healthy=false;
+  assert(!ctrl.propose(y).selected);y.hardware_healthy=true;ctrl.reset();
+  assert(ctrl.propose(y).selected);
   std::cout << "weak side assist: measured low-RPM cases, pulses, guards, stale peaks PASS\n";
 }

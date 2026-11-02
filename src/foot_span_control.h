@@ -34,14 +34,15 @@ class Controller {
     // A different ordinary selector is not a hardware fault. Carry no pending
     // request; the same learned offset may be used once a candidate can be
     // formed and a fresh new observation is available.
-    pending_=false;have_time_=true;last_limit_=now;state_=State::Collect;return true;
+    pending_=false;request_eligible_=false;have_time_=true;last_limit_=now;state_=State::Collect;return true;
   }
   bool cancelUnsent(uint16_t baseline) {
     (void)baseline;
     if(fault())return false;
     // Candidate not sent: restore the ordinary selector; do not pretend that
     // its resulting command tested the requested experimental width.
-    pending_=false;request_changed_=false;pending_change_=false;offset_ms_=0;
+    pending_=false;request_changed_=false;offset_ms_=0;requested_=baseline;
+    pending_change_=confirmed_offset_!=0;
     consecutive_=0;last_usable_end_=0;have_reference_=false;state_=State::Collect;return true;
   }
   void cycle(const Cycle& c) {
@@ -95,7 +96,7 @@ class Controller {
     if(weak_count_>=2) {
       const int restored=towardZero(offset_ms_);
       state_=restored==0?State::Collect:State::Restore;weak_count_=0;
-      if(restored!=offset_ms_) {offset_ms_=restored;++updates_;pending_change_=true;}
+      if(restored!=offset_ms_) {offset_ms_=restored;pending_change_=true;}
       return;
     }
     // Accumulate small successive worsening, not only a single large jump.
@@ -115,14 +116,14 @@ class Controller {
     const int proposal=offset_ms_+step;
     const int bounded=proposal < -30 ? -30 : proposal > 30 ? 30 : proposal;
     state_=bounded<0?State::ProbeMinus:bounded>0?State::ProbePlus:State::Collect;
-    if(bounded!=offset_ms_) {offset_ms_=bounded;++updates_;pending_change_=true;}
+    if(bounded!=offset_ms_) {offset_ms_=bounded;pending_change_=true;}
   }
   uint16_t limit(uint32_t now,uint16_t baseline,int16_t ma,int sign,
                  uint16_t existing_cap,bool allowed,float target_mj) {
     const uint16_t cap=existing_cap<100?existing_cap:100;
     const uint16_t safe=baseline<cap?baseline:cap;
     baseline_ms_=baseline;request_ma_=ma;request_target_mj_=target_mj;
-    requested_=safe;pending_=false;request_changed_=false;
+    requested_=safe;pending_=false;request_changed_=false;request_eligible_=false;
     if(fault()){requested_=0;return 0;}
     // The ordinary selector may change current every step. Keep the feedback
     // offset and track the actual current/width; a time offset at a different
@@ -132,16 +133,31 @@ class Controller {
       // selector for unsupported modes, rather than latching a zero output.
       state_=State::Collect;return safe;
     }
+    request_eligible_=true;
     if(last_usable_end_ && (now<last_usable_end_ || now-last_usable_end_>2500)) {
       offset_ms_=towardZero(offset_ms_);state_=State::Restore;pending_change_=true;
     }
     if(!last_usable_end_)return safe;
+    // If a newly requested first step has no room in that direction, try the
+    // other direction explicitly instead of repeatedly counting a blocked
+    // proposal. This is an exploratory intervention, not proof that the
+    // opposite sign improves gait. Never exceed one 10ms feedback step.
+    if(pending_change_ && confirmed_offset_==0 && offset_ms_==10 && safe==cap && safe>=20) {
+      polarity_=-polarity_;offset_ms_=-10;state_=State::ProbeMinus;
+      worse_count_=0;worse_accum_=0.f;
+    } else if(pending_change_ && confirmed_offset_==0 && offset_ms_==-10 && safe==10 && cap>=20) {
+      polarity_=-polarity_;offset_ms_=10;state_=State::ProbePlus;
+      worse_count_=0;worse_accum_=0.f;
+    }
     int wanted=static_cast<int>(safe)+offset_ms_;
     // Anti-windup: a correction blocked by a physical cap is not an
     // applied intervention. Do not hide an unexecuted offset that could
     // suddenly reappear when the ordinary cap later increases.
     if(wanted<10) {wanted=10;offset_ms_=10-static_cast<int>(safe);}
     if(wanted>cap) {wanted=cap;offset_ms_=static_cast<int>(cap)-safe;}
+    // A changing cap can itself remove an already-applied offset. Record the
+    // offset transition only after the resulting command is confirmed too.
+    if(offset_ms_!=confirmed_offset_)pending_change_=true;
     if(offset_ms_==0 && (state_==State::ProbeMinus || state_==State::ProbePlus))state_=State::Collect;
     // Only each feedback OFFSET update is limited to 10ms. The ordinary
     // selector can change its own width or mode by more than 10ms; do not
@@ -162,12 +178,13 @@ class Controller {
     }
     if(executed && supportedCurrent(ma) && sign==1 && width>0) {
       const bool changed=!last_actual_valid_ || last_actual_ma_!=ma || last_actual_sign_!=sign || width!=last_actual_width_;
-      const bool applied_feedback=changed && pending_change_ && request_changed_;
+      const bool applied_feedback=pending_change_ && request_eligible_ &&
+          ma==request_ma_ && sign==1 && width==requested_ && offset_ms_!=confirmed_offset_;
       // Track all actual width/current changes, while distinguishing changes
       // in the experimental feedback offset from ordinary baseline updates.
       if(changed)last_changed_ms_=now;
-      if(applied_feedback)last_feedback_changed_ms_=now;
-      pending_change_=false;
+      if(applied_feedback){last_feedback_changed_ms_=now;confirmed_offset_=offset_ms_;++updates_;}
+      if(request_eligible_ && ma==request_ma_ && sign==1 && width==requested_)pending_change_=false;
       last_actual_width_=width;last_actual_ma_=ma;last_actual_sign_=sign;last_actual_valid_=true;
     } else if(executed && width>0) {
       const bool changed=!last_actual_valid_ || last_actual_ma_!=ma || last_actual_sign_!=sign || width!=last_actual_width_;
@@ -193,8 +210,8 @@ class Controller {
   int16_t request_ma_=0,last_actual_ma_=0;
   int last_actual_sign_=0;
   float request_target_mj_=NAN,filtered_error_=0,reference_peak_=0,reference_left_=0,reference_right_=0,last_error_magnitude_=0,worse_accum_=0;
-  int offset_ms_=0,polarity_=-1;
+  int offset_ms_=0,confirmed_offset_=0,polarity_=-1;
   unsigned consecutive_=0,weak_count_=0,worse_count_=0,updates_=0;
-  bool have_reference_=false,last_actual_valid_=false,pending_=false,request_changed_=false,pending_change_=false,have_time_=false;
+  bool have_reference_=false,last_actual_valid_=false,pending_=false,request_changed_=false,pending_change_=false,have_time_=false,request_eligible_=false;
 };
 }

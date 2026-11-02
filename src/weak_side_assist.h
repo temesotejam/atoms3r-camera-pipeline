@@ -63,4 +63,71 @@ inline Choice choose(const Input& in) {
   out.selected=true;out.current_ma=300;out.motion_sign=1;out.deficit_deg=deficit;
   return out;
 }
+
+// Experimental bounded response tracker. A change in the next negative peak
+// is an observation, not an identified effect of this pulse: body motion,
+// opposite-side inputs, contact and other state changes can all contribute.
+// The tracker deliberately starts below the prior 70ms fixed limit. It can
+// explore upward after repeated favorable observations and backs off after
+// repeated unfavorable observations. Missing/stale/confounded observations
+// discard evidence, never latch a stop or mark an unsuccessful send as data.
+class Controller {
+ public:
+  void reset() { *this=Controller{}; }
+  void interrupt() { pending_=false; trend_=0; }
+  uint16_t limitMs() const { return limit_ms_; }
+
+  Choice propose(const Input& in) {
+    observe(in);
+    Choice out=choose(in);
+    if(out.selected && out.width_ms>limit_ms_)out.width_ms=limit_ms_;
+    return out;
+  }
+
+  // Call only after the command was accepted by the actuator interface.
+  // Record the pre-command observation and time, not a predicted next peak.
+  void confirm(const Input& in, uint16_t actual_width_ms) {
+    pending_=false;
+    const Choice candidate=choose(in);
+    if(!candidate.selected || actual_width_ms==0 ||
+       actual_width_ms>candidate.width_ms || actual_width_ms>limit_ms_ ||
+       in.last_negative_peak_ms>=in.now_ms) {trend_=0;return;}
+    before_=in.last_negative_peak_deg;
+    target_=in.active_target_deg;
+    opposite_=in.last_positive_peak_deg;
+    rpm_=in.wheel_rpm;
+    command_ms_=in.now_ms;
+    prior_peak_ms_=in.last_negative_peak_ms;
+    pending_=true;
+  }
+
+ private:
+  void observe(const Input& in) {
+    if(!pending_)return;
+    pending_=false;
+    if(!in.hardware_healthy || !in.speed_fresh ||
+       !std::isfinite(in.last_negative_peak_deg) ||
+       !std::isfinite(in.active_target_deg) ||
+       !std::isfinite(in.last_positive_peak_deg) || !std::isfinite(in.wheel_rpm) ||
+       in.now_ms<=command_ms_ || in.now_ms-command_ms_>1800 ||
+       in.last_negative_peak_ms<=command_ms_ ||
+       in.last_negative_peak_ms<=prior_peak_ms_ || in.last_negative_peak_ms>=in.now_ms ||
+       std::fabs(in.active_target_deg-target_)>.05f ||
+       std::fabs(in.last_positive_peak_deg-opposite_)>.6f ||
+       std::fabs(in.wheel_rpm-rpm_)>100.f) {trend_=0;return;}
+    const float delta=in.last_negative_peak_deg-before_;
+    // Require persistent trends so a single noisy peak does not drive an
+    // adjustment. This is a cautious heuristic, not causal identification.
+    if(delta<-.15f) trend_=trend_<0 ? trend_-1 : -1;
+    else if(delta>.15f) trend_=trend_>0 ? trend_+1 : 1;
+    else trend_=0;
+    if(trend_<=-2) {limit_ms_=limit_ms_>30 ? limit_ms_-10 : 20;trend_=0;}
+    else if(trend_>=3) {limit_ms_=limit_ms_<65 ? limit_ms_+5 : 70;trend_=0;}
+  }
+  float before_=0.f,target_=0.f,opposite_=0.f,rpm_=0.f;
+  uint32_t command_ms_=0,prior_peak_ms_=0;
+  uint16_t limit_ms_=30;
+  int8_t trend_=0;
+  bool pending_=false;
+};
 }
