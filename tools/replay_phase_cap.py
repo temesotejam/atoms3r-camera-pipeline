@@ -61,15 +61,17 @@ def events_for(h, m, extra_delay, poll_delay):
         if exposed < 0 or frame_us < 0 or delivered_us < frame_us or processing < 0:
             continue
         delivered = exposed + (delivered_us - frame_us) + processing + poll_delay*1000
-        # Mirror live phase-control gating: never treat an extrapolated camera
-        # angle as calibrated. Missing range flags fail closed for older logs.
-        lv = bool(f.get('frame_valid') and f.get('zero_ready') and f.get('left_valid') and f.get('left_in_range'))
-        rv = bool(f.get('frame_valid') and f.get('zero_ready') and f.get('right_valid') and f.get('right_in_range'))
+        # C++ replay invokes the same boundedFrame gate as firmware. Missing or
+        # nonfinite coordinates or angles fail closed instead of inventing data.
+        lv = bool(f.get('frame_valid') and f.get('left_valid'))
+        rv = bool(f.get('frame_valid') and f.get('right_valid'))
+        zero = bool(f.get('zero_ready'))
         left, right = number(f.get('left_deg')), number(f.get('right_deg'))
-        if not isinstance(f.get('left_deg'), (int, float)): lv = False
-        if not isinstance(f.get('right_deg'), (int, float)): rv = False
+        lx, rx = number(f.get('left_x')), number(f.get('right_x'))
+        if not all(isinstance(f.get(k),(int,float)) and math.isfinite(f[k]) for k in ('left_x','left_deg')): lv = False
+        if not all(isinstance(f.get(k),(int,float)) and math.isfinite(f[k]) for k in ('right_x','right_deg')): rv = False
         events.append((int(delivered / 1000), 0,
-                       f"F {int(delivered/1000)} {int(exposed/1000)} {int(lv)} {int(rv)} {left} {right}"))
+                       f"B {int(delivered/1000)} {int(exposed/1000)} {int(lv)} {int(rv)} {int(zero)} {lx} {rx} {left} {right}"))
     for p in m['energy_control_autonomous_peak_events']:
         t = p.get('peak_time_ms'); notified = p.get('peak_telemetry_capture_time_ms')
         side = p.get('physical_peak_side'); amplitude = p.get('peak_amplitude_deg')

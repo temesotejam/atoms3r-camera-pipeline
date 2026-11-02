@@ -1,6 +1,7 @@
 #pragma once
 #include <cmath>
 #include <cstdint>
+#include "foot_tracking_config.h"
 
 // Calibrated camera-relative angles, NOT ground step distance. Positive body
 // peak is paired with the left foot and negative with the right. This is the
@@ -17,6 +18,21 @@ class Observer {
   bool calibratedFrame(uint16_t id, uint32_t ms, bool lv, bool rv,
                        bool left_in_range, bool right_in_range, float left, float right) {
     return frame(id,ms,lv && left_in_range,rv && right_in_range,left,right);
+  }
+
+  // Only phase control may use a small bounded endpoint extrapolation; the
+  // normal logged in_range flags and angle calibration remain unchanged.
+  static bool boundedMarker(bool valid, bool zero_ready, float x, float angle,
+                            float minimum, float maximum) {
+    constexpr float margin=2.f;
+    return valid && zero_ready && std::isfinite(x) && std::isfinite(angle) &&
+           x>=minimum-margin && x<=maximum+margin;
+  }
+  bool boundedFrame(uint16_t id,uint32_t ms,bool lv,bool rv,bool zero_ready,
+                    float left_x,float right_x,float left,float right) {
+    return frame(id,ms,
+        boundedMarker(lv,zero_ready,left_x,left,appcfg::kFootAngleBMinCalXPx,appcfg::kFootAngleBMaxCalXPx),
+        boundedMarker(rv,zero_ready,right_x,right,appcfg::kFootAngleAMinCalXPx,appcfg::kFootAngleAMaxCalXPx),left,right);
   }
 
   // Camera frame timestamps must be strictly increasing. Their precise

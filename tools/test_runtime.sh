@@ -7,6 +7,7 @@ g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_phase_observer.cp
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_phase_cap.cpp -o /tmp/test_foot_phase_cap
 /tmp/test_foot_phase_cap
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_phase_run_replay.cpp -o /tmp/test_foot_phase_run_replay
+python3 tools/test_replay_phase_range.py /tmp/test_foot_phase_run_replay
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_phase_cap_replay.cpp -o /tmp/test_phase_cap_replay
 
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_peak_mpc.cpp -o /tmp/test_peak_mpc

@@ -40,12 +40,16 @@ def main():
         if run_id is None:run_id=rid
         if rid!=run_id:raise ValueError('mixed run IDs')
         if delivered<exposure or processing<0:continue
-        lv=bool(f.get('left_valid'));rv=bool(f.get('right_valid'))
+        lv=bool(f.get('frame_valid') and f.get('left_valid'));rv=bool(f.get('frame_valid') and f.get('right_valid'))
+        zero=bool(f.get('zero_ready'))
         left=f.get('left_deg');right=f.get('right_deg')
+        lx=f.get('left_x');rx=f.get('right_x')
         if not isinstance(left,(int,float)) or not math.isfinite(left):lv=False;left=0
         if not isinstance(right,(int,float)) or not math.isfinite(right):rv=False;right=0
+        if not isinstance(lx,(int,float)) or not math.isfinite(lx):lv=False;lx=0
+        if not isinstance(rx,(int,float)) or not math.isfinite(rx):rv=False;rx=0
         at=(m+delivered-exposure+processing)//1000+args.poll_delay_ms
-        events.append((at,0,f"F {at} {m//1000} {int(lv)} {int(rv)} {left} {right}"))
+        events.append((at,0,f"B {at} {m//1000} {int(lv)} {int(rv)} {int(zero)} {lx} {rx} {left} {right}"))
     for p in peaks:
         ms=p.get('peak_time_ms');side=p.get('physical_peak_side')
         if not isinstance(ms,int) or ms<0 or side not in (-1,1):continue

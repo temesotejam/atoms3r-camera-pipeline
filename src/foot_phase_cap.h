@@ -111,6 +111,9 @@ class Controller {
         state_=State::Locked;reason_=Reason::InputFailed;waiting_confirmation_=false;return 0;
       }
       if(std::fabs(target_mj-reference_target_mj_)>.001f)stop(Reason::TargetChanged);
+      // A changed ordinary selector invalidates the like-for-like comparison
+      // and can otherwise turn a single 5 ms probe into a larger restriction.
+      else if(baseline_ms!=anchor_width_)stop(Reason::InputFailed);
       else if(baseline_ms<75||baseline_ms>100)stop(Reason::InputFailed);
     }
     if(state_==State::Waiting) {
@@ -123,11 +126,6 @@ class Controller {
          !std::isfinite(targets_[0])||!std::isfinite(targets_[1])||
          std::fabs(targets_[0]-target_mj)>.001f||std::fabs(targets_[1]-target_mj)>.001f)return safe;
       anchor_width_=baseline_ms;last_width_=actual_width_;reference_target_mj_=target_mj;startTrial();
-    } else if(state_==State::Hold) {
-      // A confirmed improvement may justify one more 5ms probe. Never alter a
-      // preexisting tighter safety cap or require a larger action to restore.
-      if(count_>=2 && err_[0]>.30f && err_[1]>.30f && last_width_>anchor_width_-15 &&
-         safe>=last_width_) startTrial();
     }
     if(state_==State::Trial) {
       if(waiting_confirmation_) {stop(Reason::InputFailed);return safe;}
@@ -198,7 +196,9 @@ class Controller {
     reference_right_=(right_[0]+right_[1])*.5f;
     reference_total_=(left_[0]+left_[1]+right_[0]+right_[1])*.5f;
     desired_width_=static_cast<uint16_t>(last_width_>5?last_width_-5:0);
-    const uint16_t floor=anchor_width_>15?anchor_width_-15:0;
+    // One exploratory 5 ms reduction per run. A two-cycle response is not
+    // sufficient evidence to automatically take further steps.
+    const uint16_t floor=anchor_width_>5?anchor_width_-5:0;
     if(desired_width_<floor)desired_width_=floor;
     trial_count_=weak_count_=0;trial_error_sum_=0;trial_started_=false;
     waiting_confirmation_=false;state_=State::Trial;

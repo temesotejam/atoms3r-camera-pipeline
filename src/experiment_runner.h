@@ -45,7 +45,7 @@ public:
   void RW_HOT_CODE update();
   void updateImuDynamicBetaContext();
   void observeFootFrame(uint16_t run_id,uint32_t frame_ms,bool left_valid,bool right_valid,float left_deg,float right_deg,float left_px,float right_px,
-                        bool left_in_range,bool right_in_range);
+                        bool phase_frame_valid,bool phase_zero_ready,float phase_left_x,float phase_right_x);
   void setLoopDt(uint32_t dt_us) { status_.loop_dt_us = dt_us; }
   void recordTimingProbeLoop(uint32_t imu_update_us, uint32_t runner_update_us, uint32_t core1_path_us);
 

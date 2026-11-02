@@ -200,7 +200,7 @@ static bool controlStep(void*) {
           f.left_valid,f.right_valid,f.left_deg,f.right_deg,
           (f.zero_ready && f.frame_valid && f.left_valid) ? fs.left_zero-f.left_x : NAN,
           (f.zero_ready && f.frame_valid && f.right_valid) ? fs.right_zero-f.right_x : NAN,
-          f.left_in_range,f.right_in_range);
+          f.frame_valid,f.zero_ready,f.left_x,f.right_x);
     }
   }
   runner.update();

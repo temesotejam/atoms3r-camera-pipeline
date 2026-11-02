@@ -42,10 +42,10 @@ int main() {
       if(!(std::cin>>now))return 1;
       std::cout<<"first_unavailable_pre_mpc_baseline_ms="<<now<<" pairs="<<paired<<" valid_pairs="<<valid_pairs<<"\n";
       return 0;
-    } else if(op=='F') {
-      int lv=0,rv=0;float left=0,right=0;
-      if(!(std::cin>>now>>ms>>lv>>rv>>left>>right))return 1;
-      observer.frame(static_cast<uint16_t>(run),ms,lv,rv,left,right);
+    } else if(op=='B') {
+      int lv=0,rv=0,zero=0;float left_x=0,right_x=0,left=0,right=0;
+      if(!(std::cin>>now>>ms>>lv>>rv>>zero>>left_x>>right_x>>left>>right))return 1;
+      observer.boundedFrame(static_cast<uint16_t>(run),ms,lv,rv,zero,left_x,right_x,left,right);
       // observeFootFrame passes the frame exposure time, not delivery time.
       process(ms);
     } else if(op=='P') {

@@ -20,17 +20,54 @@ int main(){
   Controller c;prepare(c);assert(limit(c,1850)==75);confirm(c,1850,75);
   pair(c,2600); // starts before change: cannot be used as counterfactual evidence
   heldCycle(c,3400,75,1.8f,.4f,4.6f);heldCycle(c,4200,75,1.8f,.4f,4.6f);
-  assert(c.state()==State::Hold);assert(limit(c,4250)==70);confirm(c,4250,70);
-  pair(c,5000,1.8f,.4f,4.6f); // overlapping transition pair is excluded
-  heldCycle(c,5800,70,1.4f,.8f,4.6f);heldCycle(c,6600,70,1.4f,.8f,4.6f);
-  assert(c.state()==State::Hold);assert(limit(c,6650)==65);confirm(c,6650,65);
+  assert(c.state()==State::Hold);assert(limit(c,4250)==75);confirm(c,4250,75);
+  pair(c,5000,1.8f,.4f,4.6f);
+  heldCycle(c,5800,75,1.4f,.8f,4.6f);heldCycle(c,6600,75,1.4f,.8f,4.6f);
+  assert(c.state()==State::Hold);assert(limit(c,6650)==75);confirm(c,6650,75);
   pair(c,7400,1.4f,.8f,4.6f);
-  heldCycle(c,8200,65,1.2f,1.f,4.6f);heldCycle(c,9000,65,1.2f,1.f,4.6f);
-  assert(c.state()==State::Hold);assert(limit(c,9050)==65);confirm(c,9050,65);
+  heldCycle(c,8200,75,1.2f,1.f,4.6f);heldCycle(c,9000,75,1.2f,1.f,4.6f);
+  assert(c.state()==State::Hold);assert(limit(c,9050)==75);confirm(c,9050,75);
   c.tick(11500);assert(c.state()==State::Release && c.reason()==Reason::Stale);
-  assert(limit(c,11501)==70);confirm(c,11501,70);
-  assert(limit(c,11502)==75);confirm(c,11502,75);
-  assert(limit(c,11503)==80);confirm(c,11503,80);assert(c.state()==State::Locked);
+  assert(limit(c,11501)==80);confirm(c,11501,80);assert(c.state()==State::Locked);
+  // The one-step reduction is relative to the actual starting baseline,
+  // rather than a hard-coded 75 ms limit.
+  Controller eighty_five;
+  assert(eighty_five.limit(900,85,400,1,85,true,.4f)==85);confirm(eighty_five,900,85);pair(eighty_five,1000);
+  assert(eighty_five.limit(1700,85,400,1,85,true,.4f)==85);confirm(eighty_five,1700,85);pair(eighty_five,1800);
+  assert(eighty_five.limit(1850,85,400,1,85,true,.4f)==80);confirm(eighty_five,1850,80);pair(eighty_five,2600);
+  assert(eighty_five.limit(2650,85,400,1,85,true,.4f)==80);confirm(eighty_five,2650,80);
+  pair(eighty_five,3400,1.8f,.4f,4.6f);
+  assert(eighty_five.limit(3450,85,400,1,85,true,.4f)==80);confirm(eighty_five,3450,80);
+  pair(eighty_five,4200,1.8f,.4f,4.6f);
+  assert(eighty_five.state()==State::Hold);
+  assert(eighty_five.limit(4250,85,400,1,85,true,.4f)==80);
+  // A new ordinary candidate ends identification before the old fixed cap
+  // can continue to diverge from it. Increases restore by at most 5 ms per
+  // issued pulse; a decrease follows the new tighter candidate immediately.
+  Controller rise;prepare(rise);
+  assert(limit(rise,1850)==75);confirm(rise,1850,75);pair(rise,2600);
+  heldCycle(rise,3400,75,1.8f,.4f);heldCycle(rise,4200,75,1.8f,.4f);
+  assert(rise.state()==State::Hold);
+  assert(rise.limit(4250,90,400,1,90,true,.4f)==80);
+  assert(rise.state()==State::Release && rise.reason()==Reason::InputFailed);
+  confirm(rise,4250,80);
+  assert(rise.limit(5050,90,400,1,90,true,.4f)==85);confirm(rise,5050,85);
+  assert(rise.limit(5850,90,400,1,90,true,.4f)==90);confirm(rise,5850,90);
+  assert(rise.state()==State::Locked);
+  assert(rise.limit(6650,90,400,1,90,true,.4f)==90);
+  Controller fall;prepare(fall);
+  assert(limit(fall,1850)==75);confirm(fall,1850,75);pair(fall,2600);
+  heldCycle(fall,3400,75,1.8f,.4f);heldCycle(fall,4200,75,1.8f,.4f);
+  assert(fall.state()==State::Hold);
+  assert(fall.limit(4250,70,400,1,70,true,.4f)==70);
+  assert(fall.state()==State::Release && fall.reason()==Reason::InputFailed);
+  confirm(fall,4250,70);assert(fall.state()==State::Locked);
+  assert(fall.limit(5050,70,400,1,70,true,.4f)==70);
+  Controller tighter;prepare(tighter);
+  assert(limit(tighter,1850)==75);confirm(tighter,1850,75);
+  assert(tighter.limit(1900,90,400,1,60,true,.4f)==60);
+  assert(tighter.state()==State::Release);confirm(tighter,1900,60);
+  assert(tighter.limit(2700,90,400,1,60,true,.4f)==60);confirm(tighter,2700,60);
   // No response after two complete cycles restores the baseline.
   Controller flat;prepare(flat);assert(limit(flat,1850)==75);confirm(flat,1850,75);pair(flat,2600);
   heldCycle(flat,3400,75,2.2f,-.1f);heldCycle(flat,4200,75,2.2f,-.1f);

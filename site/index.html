@@ -18,6 +18,7 @@
     </header>
     <section class="panel important">
       <h2>書き込みと測定</h2>
+      <p><strong>公開バージョン：1.0.60</strong>。足の位相による左右差調整は実験中です。校正端付近の値を限定的に使い、入力を一段階だけ調整します。実機での効果はこれから確認します。</p>
       <p>書き込み時はPCをインターネットにつながるWi-Fiまたは有線LANへ接続し、AtomS3RをUSBでつないでください。PC版ChromeまたはEdgeで下のボタンを押します。機体のWi-Fiへ切り替えるのは書き込み完了後です。</p>
       <esp-web-install-button manifest="manifest-freefoot-runtime-v2.json">
         <button slot="activate" class="primary">左右揺動エネルギー制御を書き込む</button>
@@ -60,6 +61,11 @@
     </section>
 
     <h2>変更履歴</h2>
+    <section class="panel important">
+      <h2>1.0.60：校正端付近でも足の左右差を観測</h2>
+      <p>今回のログで、右足の直立位置が校正範囲を少し超えたため、1.0.59の足位相制御が一度も発動していないことを確認しました。校正端から最大2ピクセルの限定的な外挿を試験的に使います。</p>
+      <p>正側の入力時間は通常候補から5 ms短縮する一段階の試行です。足の状態や通常候補が変化した場合などは調整を中断します。左右差・直進の改善は実機では未確認です。<a href="https://github.com/temesotejam/atoms3r-lateral-energy-control/blob/main/docs/FOOT_PHASE_CONTROL_060.md">今回のログと検証内容</a></p>
+    </section>
     <section class="panel important">
       <h2>1.0.59：足の位相に合わせた左右差の観測と試験制御</h2>
       <p>目標8°で、揺動ピークに対応する左右の足マーカーの動きを比較し、条件が揃うと正側の入力時間を5 msずつ調整します。入力が揃わない場合や足マーカーが校正範囲外の場合は、この調整を行いません。</p>
