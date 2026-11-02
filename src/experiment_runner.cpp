@@ -2870,9 +2870,9 @@ void ExperimentRunner::processFootPhaseCycle(uint32_t now_ms) {
   unsigned decisions=0;
   for(const auto& p:phase_negative_peaks_) if(p.ms==end && p.ms)peak=&p;
   for(const auto& d:phase_negative_decisions_) if(d.ms>start && d.ms<end) {decision=&d;++decisions;}
-  const bool known=decisions==1 && decision && decision->known;
+  const auto negative=decisions==1 && decision ? decision->value : foot_phase_cap::NegativeDecision{};
   foot_phase_cap_.pair(end,start,foot_phase_observer_.leftLatest(),foot_phase_observer_.rightLatest(),
-      peak ? peak->amplitude : NAN,known,known && decision->executed,
+      peak ? peak->amplitude : NAN,negative,
       peak && foot_phase_observer_.valid(now_ms));
 }
 void ExperimentRunner::recordFootPhasePeak(int8_t physical_side,uint32_t peak_ms,float amplitude_deg) {
@@ -3505,9 +3505,13 @@ void ExperimentRunner::finishFootEnergyDecision(PsramLogger::EnergyControlAutono
     foot_phase_cap_.tick(t_ms);
     if(event.physical_next_peak_side<0) {
       auto& d=phase_negative_decisions_[phase_negative_decision_next_];
-      d.ms=t_ms;d.known=event.valid;d.executed=event.output_executed;
+      d.ms=t_ms;
+      d.value=foot_phase_cap::classifyNegative(event.valid,event.output_executed,
+          event.reason==Config::ENERGY_CONTROL_AUTONOMOUS_REASON_NONE,
+          event.reason==Config::ENERGY_CONTROL_AUTONOMOUS_REASON_VALID_NO_OUTPUT,
+          event.command_current_mA,event.q_command_direction,event.pulse_width_ms,event.work_control_branch);
       phase_negative_decision_next_=(phase_negative_decision_next_+1)%8;
-      foot_phase_cap_.negativeDecision(t_ms,d.known,d.executed);
+      foot_phase_cap_.negativeDecision(t_ms,d.value);
     } else if(event.physical_next_peak_side>0) {
       foot_phase_cap_.confirm(t_ms,event.output_executed,event.command_current_mA,
           event.q_command_direction,event.pulse_width_ms);

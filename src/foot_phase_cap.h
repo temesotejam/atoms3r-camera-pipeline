@@ -10,16 +10,38 @@ namespace foot_phase_cap {
 enum class State : uint8_t { Waiting=0, Trial=1, Hold=2, Release=3, Locked=4 };
 enum class Reason : uint8_t { None=0, Stale=1, Invalid=2, InputFailed=3, NegativeLoss=4,
   WeakPeak=5, Worsened=6, Inconclusive=7, Reversed=8, Disallowed=9, TargetChanged=10, ModeChanged=11 };
+enum class NegativeMode : uint8_t { Invalid=0, Coast=1, Powered=2 };
+struct NegativeDecision {
+  NegativeMode mode=NegativeMode::Invalid;
+  int16_t ma=0; int8_t sign=0; uint16_t width=0; uint8_t branch=0;
+  bool same(const NegativeDecision& other) const {
+    return mode!=NegativeMode::Invalid && mode==other.mode && branch==other.branch &&
+        (mode==NegativeMode::Coast || (ma==other.ma && sign==other.sign && width==other.width));
+  }
+};
+// Classify only an explicit ordinary no-output result as coast; all failed,
+// unsupported or inconsistent decisions remain invalid.
+inline NegativeDecision classifyNegative(bool valid,bool executed,bool reason_none,bool reason_coast,
+    int16_t ma,int sign,uint16_t width,uint8_t branch) {
+  NegativeDecision d;
+  if(valid && branch && !executed && reason_coast && !reason_none && width==0 && ma==0) {
+    d.mode=NegativeMode::Coast;d.branch=branch;
+  } else if(valid && branch && executed && reason_none && !reason_coast && width>0 && ma>0 &&
+            (sign==1||sign==-1)) {
+    d.mode=NegativeMode::Powered;d.ma=ma;d.sign=static_cast<int8_t>(sign);d.width=width;d.branch=branch;
+  }
+  return d;
+}
 class Controller {
  public:
   void reset(){*this=Controller{};}
   // One complete, independently observed phase pair; now is its end time and
   // start is its first boundary. Units are calibrated camera-relative degrees.
   __attribute__((noinline)) void pair(uint32_t now,uint32_t start,float left,float right,
-      float negative_peak,bool negative_known,bool negative_executed,bool valid) {
+      float negative_peak,NegativeDecision negative,bool valid) {
     if(state_==State::Locked)return;
     if(last_pair_ && now<=last_pair_)return; // never count a cycle twice
-    if(!valid||!negative_known||!std::isfinite(left)||!std::isfinite(right)||
+    if(!valid||negative.mode==NegativeMode::Invalid||!std::isfinite(left)||!std::isfinite(right)||
        !std::isfinite(negative_peak)||negative_peak<=0.f||
        std::fabs(left)>25.f||std::fabs(right)>25.f||start>now||now-start<250||now-start>2000) {
       stop(Reason::Invalid);return;
@@ -27,8 +49,6 @@ class Controller {
     if(last_pair_ && (now-last_pair_>2000 || start!=last_pair_)) {
       stop(Reason::Stale);return;
     }
-    if((state_==State::Trial || state_==State::Hold) && had_negative_ &&
-        previous_negative_output_ && !negative_executed) {stop(Reason::NegativeLoss);return;}
     const Actual* cycle_actual=nullptr;unsigned cycle_actions=0;
     for(unsigned i=0;i<actual_count_;++i) {
       const Actual& a=history_[(actual_next_+kHistory-actual_count_+i)%kHistory];
@@ -40,7 +60,6 @@ class Controller {
         cycle_actual->width!=desired_width_)) {
       stop(Reason::InputFailed);return;
     }
-    previous_negative_output_=negative_executed;had_negative_=true;
     last_pair_=now;
     const float motion=std::fabs(left)+std::fabs(right);
     // Preserve each foot's sign and compare calibrated degrees directly: a
@@ -49,7 +68,7 @@ class Controller {
     if(!std::isfinite(e) || motion<.30f || (left<=0.f && right<=0.f)) {stop(Reason::Invalid);return;}
     if((state_==State::Trial || state_==State::Hold) && e<-.30f) {stop(Reason::Reversed);return;}
     err_[next_]=e;peak_[next_]=negative_peak;left_[next_]=left;right_[next_]=right;
-    neg_output_[next_]=negative_executed;targets_[next_]=cycle_actual->target_mj;
+    negative_[next_]=negative;targets_[next_]=cycle_actual->target_mj;
     widths_[next_]=cycle_actual->width;
     next_=(next_+1)%2;if(count_<2)++count_;
     if((state_!=State::Trial && state_!=State::Hold) || !trial_started_ || start<=trial_start_)return;
@@ -58,6 +77,11 @@ class Controller {
     if(weak_count_>=2) {stop(Reason::WeakPeak);return;}
     if(e>reference_error_+.30f || right<reference_right_-.15f ||
        left+right<reference_total_-.30f) {stop(Reason::Worsened);return;}
+    if(!negative.same(reference_negative_)) {
+      if(++noncomparable_count_>=2) stop(Reason::Inconclusive);
+      return;
+    }
+    noncomparable_count_=0;
     if(state_==State::Hold)return;
     trial_error_sum_+=e;++trial_count_;
     if(trial_count_>=2) {
@@ -66,14 +90,13 @@ class Controller {
       else stop(Reason::Inconclusive);
     }
   }
-  // Notify every negative decision immediately, including explicit no-output
-  // and a missing/invalid decision. Do not wait for the next camera frame.
-  void negativeDecision(uint32_t now,bool known,bool executed) {
+  // Invalid decisions interrupt immediately. Explicit model-selected coast is
+  // observed and compared at the completed-cycle boundary.
+  void negativeDecision(uint32_t now,NegativeDecision decision) {
     (void)now;
-    if((state_==State::Trial||state_==State::Hold) && (!known||!executed)) {
-      stop(known?Reason::NegativeLoss:Reason::Invalid);return;
+    if((state_==State::Trial||state_==State::Hold) && decision.mode==NegativeMode::Invalid) {
+      stop(Reason::Invalid);
     }
-    previous_negative_output_=known && executed;had_negative_=known;
   }
   // Caller skips the current positive output when a required branch-5
   // candidate cannot be formed; the next crossing uses the normal selector.
@@ -119,7 +142,7 @@ class Controller {
     if(state_==State::Waiting) {
       if(count_<2||!last_pair_||now<last_pair_||now-last_pair_>1500||
          baseline_ma!=400||sign!=1||baseline_ms<75||baseline_ms>100||safe!=baseline_ms||
-         err_[0]<=.30f||err_[1]<=.30f||!neg_output_[0]||!neg_output_[1]||
+         err_[0]<=.30f||err_[1]<=.30f||!negative_[0].same(negative_[1])||
          peak_[1-next_]<peak_[next_]-.30f||!actual_valid_||actual_ma_!=400||actual_sign_!=1||
          now<actual_ms_||now-actual_ms_>1500||actual_width_!=baseline_ms ||
          widths_[0]!=baseline_ms||widths_[1]!=baseline_ms||
@@ -182,6 +205,8 @@ class Controller {
   }
   // Monitoring can stop a trial even if no new complete pair arrives.
   void tick(uint32_t now) {
+    if(state_==State::Trial && trial_started_ &&
+        (now<trial_start_ || now-trial_start_>5000)) {stop(Reason::Inconclusive);return;}
     if((state_==State::Trial||state_==State::Hold) && last_pair_ &&
         (now<last_pair_||now-last_pair_>2000))stop(Reason::Stale);
   }
@@ -193,6 +218,7 @@ class Controller {
   struct Actual {uint32_t ms=0;uint16_t width=0;int16_t ma=0;int sign=0;float target_mj=NAN;bool executed=false;};
   void startTrial(){
     reference_error_=(err_[0]+err_[1])*.5f;reference_peak_=(peak_[0]+peak_[1])*.5f;
+    reference_negative_=negative_[0];
     reference_right_=(right_[0]+right_[1])*.5f;
     reference_total_=(left_[0]+left_[1]+right_[0]+right_[1])*.5f;
     desired_width_=static_cast<uint16_t>(last_width_>5?last_width_-5:0);
@@ -200,8 +226,8 @@ class Controller {
     // sufficient evidence to automatically take further steps.
     const uint16_t floor=anchor_width_>5?anchor_width_-5:0;
     if(desired_width_<floor)desired_width_=floor;
-    trial_count_=weak_count_=0;trial_error_sum_=0;trial_started_=false;
-    waiting_confirmation_=false;state_=State::Trial;
+    trial_count_=weak_count_=noncomparable_count_=0;trial_error_sum_=0;trial_started_=false;
+    waiting_confirmation_=false;reason_=Reason::None;state_=State::Trial;
   }
   void stop(Reason why){
     if(state_==State::Locked)return;
@@ -218,7 +244,9 @@ class Controller {
   uint16_t anchor_width_=0,last_width_=0,desired_width_=0,requested_=0,restore_target_=0,actual_width_=0;
   uint16_t widths_[2]={};
   int16_t actual_ma_=0;int actual_sign_=0;
-  bool neg_output_[2]={},had_negative_=false,previous_negative_output_=false,trial_started_=false;
+  NegativeDecision negative_[2],reference_negative_;
+  unsigned noncomparable_count_=0;
+  bool trial_started_=false;
   bool waiting_confirmation_=false,actual_valid_=false,require_neutral_=false;
 };
 }

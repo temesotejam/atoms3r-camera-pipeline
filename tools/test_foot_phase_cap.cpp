@@ -2,8 +2,10 @@
 #include <cassert>
 #include <iostream>
 using namespace foot_phase_cap;
+static NegativeDecision powered() {return classifyNegative(true,true,true,false,300,-1,25,10);}
+static NegativeDecision coast() {return classifyNegative(true,false,false,true,0,-1,0,11);}
 static void pair(Controller& c,unsigned end,float left=2.2f,float right=-.1f,float neg=4.7f,bool neg_output=true) {
-  c.pair(end,end-800,left,right,neg,true,neg_output,true);
+  c.pair(end,end-800,left,right,neg,neg_output ? powered() : coast(),true);
 }
 static unsigned limit(Controller& c,unsigned now,unsigned cap=80,float target=.4f){return c.limit(now,80,400,1,cap,true,target);}
 static void confirm(Controller& c,unsigned now,unsigned width){c.confirm(now,true,400,1,width);}
@@ -83,24 +85,77 @@ int main(){
   // No probing after negative no-output, low-side trend collapse, duplicated
   // or overlapping pairs, absent baseline confirmation or missing sensors.
   Controller no_neg;baseline(no_neg,900);pair(no_neg,1000,2,0,4.7,false);baseline(no_neg,1700);
-  pair(no_neg,1800,2,0,4.7,false);assert(limit(no_neg,1850)==80);
+  pair(no_neg,1800,2,0,4.7,false);assert(limit(no_neg,1850)==75);
   Controller trend;baseline(trend,900);pair(trend,1000,2,0,4.7);baseline(trend,1700);
   pair(trend,1800,2,0,4.2);assert(limit(trend,1850)==80);
   Controller duplicate;baseline(duplicate,900);pair(duplicate,1000);pair(duplicate,1000);
-  assert(limit(duplicate,1100)==80);duplicate.pair(1800,400,2,0,4.7,true,true,true);
+  assert(limit(duplicate,1100)==80);duplicate.pair(1800,400,2,0,4.7,powered(),true);
   assert(limit(duplicate,1850)==80);
   Controller no_actual;pair(no_actual,1000);pair(no_actual,1800);assert(limit(no_actual,1850)==80);
   Controller lost;prepare(lost);assert(limit(lost,1850)==75);confirm(lost,1850,75);
-  lost.negativeDecision(2000,true,false);
-  assert(lost.state()==State::Release && lost.reason()==Reason::NegativeLoss);
+  lost.negativeDecision(2000,NegativeDecision{});
+  assert(lost.state()==State::Release && lost.reason()==Reason::Invalid);
   Controller weak;prepare(weak);assert(limit(weak,1850)==75);confirm(weak,1850,75);pair(weak,2600);
   heldCycle(weak,3400,75,2.2f,-.1f,4.1f);heldCycle(weak,4200,75,2.2f,-.1f,4.0f);
   assert(weak.state()==State::Release && weak.reason()==Reason::WeakPeak);
   // Hold must continue monitoring deterioration, rather than holding forever.
   Controller later;prepare(later);assert(limit(later,1850)==75);confirm(later,1850,75);pair(later,2600);
   heldCycle(later,3400,75,1.8f,.4f);heldCycle(later,4200,75,1.8f,.4f);
-  assert(later.state()==State::Hold);later.negativeDecision(4250,true,false);
-  assert(later.state()==State::Release && later.reason()==Reason::NegativeLoss);
+  assert(later.state()==State::Hold);later.negativeDecision(4250,NegativeDecision{});
+  assert(later.state()==State::Release && later.reason()==Reason::Invalid);
+  // Run 147: 25ms powered baseline; 30ms powered then valid zero-width
+  // coast. Coast is not an immediate failure, but neither changed cycle can
+  // qualify the earlier powered-25ms reference as an improvement.
+  const auto powered30=classifyNegative(true,true,true,false,300,-1,30,10);
+  Controller logged;prepare(logged);assert(limit(logged,1850)==75);confirm(logged,1850,75);
+  pair(logged,2600);
+  assert(limit(logged,2650)==75);confirm(logged,2650,75);
+  logged.negativeDecision(3000,powered30);
+  logged.pair(3400,2600,1.0f,1.0f,4.7f,powered30,true);
+  assert(logged.state()==State::Trial);
+  assert(limit(logged,3450)==75);confirm(logged,3450,75);
+  logged.negativeDecision(3800,coast());
+  assert(logged.state()==State::Trial);
+  logged.pair(4200,3400,1.0f,1.0f,4.7f,coast(),true);
+  assert(logged.state()==State::Release && logged.reason()==Reason::Inconclusive);
+  assert(limit(logged,4250)==80);confirm(logged,4250,80);
+  assert(logged.state()==State::Locked);
+  // Coast is only the specific valid, zero-width and zero-current no-output
+  // result. A failed command cannot masquerade as a safe coast.
+  assert(coast().mode==NegativeMode::Coast);
+  assert(classifyNegative(false,false,false,true,0,-1,0,11).mode==NegativeMode::Invalid);
+  assert(classifyNegative(true,false,false,false,0,-1,0,11).mode==NegativeMode::Invalid);
+  assert(classifyNegative(true,false,false,true,300,-1,0,11).mode==NegativeMode::Invalid);
+  assert(classifyNegative(true,false,false,true,0,-1,10,11).mode==NegativeMode::Invalid);
+  assert(classifyNegative(true,true,false,true,300,-1,25,10).mode==NegativeMode::Invalid);
+  // Two powered baseline cycles must not be pooled with one coast cycle.
+  // A lone unmatched coast does not contribute to successful identification;
+  // two following *matching* powered cycles can still provide evidence.
+  Controller resume;prepare(resume);assert(limit(resume,1850)==75);confirm(resume,1850,75);pair(resume,2600);
+  assert(limit(resume,2650)==75);confirm(resume,2650,75);
+  resume.negativeDecision(3000,coast());
+  resume.pair(3400,2600,1.8f,.4f,4.7f,coast(),true);
+  assert(resume.state()==State::Trial);
+  heldCycle(resume,4200,75,1.8f,.4f);
+  assert(resume.state()==State::Trial);
+  heldCycle(resume,5000,75,1.8f,.4f);
+  assert(resume.state()==State::Hold);
+  // Two valid coasting baseline cycles can themselves be compared with
+  // coasting trial cycles; the two modes are never mixed.
+  Controller coast_base;baseline(coast_base,900);pair(coast_base,1000,2.2f,-.1f,4.7f,false);
+  baseline(coast_base,1700);pair(coast_base,1800,2.2f,-.1f,4.7f,false);
+  assert(limit(coast_base,1850)==75);confirm(coast_base,1850,75);
+  pair(coast_base,2600,2.2f,-.1f,4.7f,false);
+  assert(limit(coast_base,2650)==75);confirm(coast_base,2650,75);
+  coast_base.pair(3400,2600,1.8f,.4f,4.7f,coast(),true);
+  assert(limit(coast_base,3450)==75);confirm(coast_base,3450,75);
+  coast_base.pair(4200,3400,1.8f,.4f,4.7f,coast(),true);
+  assert(coast_base.state()==State::Hold);
+  Controller deadline;prepare(deadline);assert(limit(deadline,1850)==75);confirm(deadline,1850,75);
+  deadline.tick(6851);
+  assert(deadline.state()==State::Release && deadline.reason()==Reason::Inconclusive);
+  assert(limit(deadline,6852)==80);confirm(deadline,6852,80);
+  assert(deadline.state()==State::Locked);
   // A stricter existing cap can force an immediate drop. After confirming its
   // actual 60ms pulse, any increase must start from 60ms, not the old 75ms.
   Controller safety;prepare(safety);assert(limit(safety,1850)==75);confirm(safety,1850,75);

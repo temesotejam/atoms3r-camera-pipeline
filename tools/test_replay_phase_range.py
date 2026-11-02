@@ -47,14 +47,13 @@ def replay(left_x,right_x,zero_change=False,**updates):
     return [s.split() for s in result.stdout.splitlines()]
 
 assert len(sys.argv)==2, 'pass compiled test_foot_phase_run_replay executable'
-base=replay(201.6569+2,203.0819+2)
-assert len(base)==2 and base==replay(201.6569+2,203.0819+2,zero_change=True)
-assert len(replay(63.6918-2,67.5192-2))==2
-assert not replay(201.6569+2.01,203.0819)
-assert not replay(201.6569,203.0819+2.01)
-assert not replay(201.6569+3,203.0819)
-assert not replay(201.6569,203.0819+3)
-assert not replay(203.8,203.0) and len(replay(201.0,203.8))==2
+base=replay(201.6569+3,203.0819+3)
+assert len(base)==2 and base==replay(201.6569+3,203.0819+3,zero_change=True)
+assert len(replay(63.6918-3,67.5192-3))==2
+assert not replay(201.6569+3.01,203.0819)
+assert not replay(201.6569,203.0819+3.01)
+assert not replay(201.6569+20,203.0819)
+assert not replay(205,203.0) and len(replay(201.0,205))==2
 assert not replay(float('nan'),203.0819)
 assert not replay(201.6569,float('nan'))
 assert not replay(None,203.0819)

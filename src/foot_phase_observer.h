@@ -23,9 +23,10 @@ class Observer {
 
   // Phase-only fixed-reference angle. Unlike UI foot angles, this never uses
   // the per-boot zero, so a late zero lock cannot step the control signal.
-  // Endpoint extrapolation remains limited to 2px of measured support.
+  // Endpoint extrapolation is limited to 3px of measured support; its
+  // accuracy outside the measured support has not been independently verified.
   static bool boundedMarker(bool detected, float x, float minimum, float maximum) {
-    constexpr float margin=2.f;
+    constexpr float margin=3.f;
     return detected && std::isfinite(x) &&
            x>=minimum-margin && x<=maximum+margin;
   }

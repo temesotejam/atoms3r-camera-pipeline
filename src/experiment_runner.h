@@ -158,7 +158,7 @@ private:
   foot_phase_observer::Observer foot_phase_observer_;
   foot_phase_cap::Controller foot_phase_cap_;
   struct PhaseNegativePeak { uint32_t ms=0; float amplitude=NAN; };
-  struct PhaseNegativeDecision { uint32_t ms=0; bool known=false,executed=false; };
+  struct PhaseNegativeDecision { uint32_t ms=0; foot_phase_cap::NegativeDecision value; };
   PhaseNegativePeak phase_negative_peaks_[8];
   PhaseNegativeDecision phase_negative_decisions_[8];
   unsigned phase_negative_peak_next_=0,phase_negative_decision_next_=0;

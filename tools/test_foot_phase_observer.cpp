@@ -116,14 +116,15 @@ int main() {
   const float lmin=appcfg::kFootAngleBMinCalXPx, lmax=appcfg::kFootAngleBMaxCalXPx;
   const float rmin=appcfg::kFootAngleAMinCalXPx, rmax=appcfg::kFootAngleAMaxCalXPx;
   auto ok=Observer::boundedMarker;
-  assert(ok(true,lmin-2.f,lmin,lmax));
-  assert(ok(true,lmax+2.f,lmin,lmax));
-  assert(!ok(true,lmin-3.f,lmin,lmax));
-  assert(!ok(true,lmax+3.f,lmin,lmax));
+  assert(ok(true,lmin-3.f,lmin,lmax));
+  assert(ok(true,lmax+3.f,lmin,lmax));
+  assert(!ok(true,lmin-3.01f,lmin,lmax));
+  assert(!ok(true,lmax+3.01f,lmin,lmax));
+  assert(!ok(true,lmax+20.f,lmin,lmax));
   assert(!ok(true,NAN,lmin,lmax));
   assert(!ok(false,lmax,lmin,lmax));
-  assert(ok(true,rmax+2.f,rmin,rmax));
-  assert(!ok(true,rmax+3.f,rmin,rmax));
+  assert(ok(true,rmax+3.f,rmin,rmax));
+  assert(!ok(true,rmax+3.01f,rmin,rmax));
   o.reset(16);
   auto rawCapture=[&](int side,unsigned ms,float lx,float rx,bool detected=true) {
     assert(o.peak(16,side,ms));
@@ -144,7 +145,7 @@ int main() {
     assert(close(calc,l_expected));
   }
   assert(!close(l_expected,25.f*appcfg::kFootAngleBDegPerPx));
-  rawCapture(1,3000,lmax+1.f,rmax+3.f);
+  rawCapture(1,3000,lmax+1.f,rmax+3.01f);
   assert(!o.valid(3110));
   rawCapture(-1,3400,lmax,rmax,false);
   assert(!o.valid(3510));

@@ -10,7 +10,7 @@
 // recorded-state replay, not a model of the machine after an intervention.
 // Stop at the first command that differs from the actual recorded command.
 struct NegativePeak { unsigned ms; float amplitude; };
-struct NegativeDecision { unsigned ms; bool known; bool executed; };
+struct NegativeDecision { unsigned ms; foot_phase_cap::NegativeDecision value; };
 
 int main() {
   foot_phase_observer::Observer observer;
@@ -24,14 +24,15 @@ int main() {
     if(observer.sequence()==seq)return;
     seq=observer.sequence();++paired;
     const uint32_t start=observer.cycleStart(),end=observer.cycleTime();
-    float amplitude=NAN;bool peak_known=false,known=false,executed=false;
+    float amplitude=NAN;bool peak_known=false;
+    foot_phase_cap::NegativeDecision decision;
     unsigned count=0;
     for(const auto& p:peaks)if(p.ms==end){amplitude=p.amplitude;peak_known=true;}
-    for(const auto& d:decisions)if(d.ms>start && d.ms<end){++count;known=d.known;executed=d.executed;}
+    for(const auto& d:decisions)if(d.ms>start && d.ms<end){++count;decision=d.value;}
     const bool valid=peak_known && observer.valid(time_ms);
     if(valid)++valid_pairs;
     cap.pair(end,start,observer.leftLatest(),observer.rightLatest(),amplitude,
-             count==1 && known,count==1 && known && executed,valid);
+             count==1 ? decision : foot_phase_cap::NegativeDecision{},valid);
   };
   while(std::cin>>op) {
     if(op=='R') {
@@ -56,15 +57,18 @@ int main() {
       process(now);
     } else if(op=='Z') {
       int side=0,baseline=0,baseline_ma=0,sign=0,existing_cap=0,allowed=0;
-      int known=0,executed=0,actual_ma=0,actual_sign=0,actual_width=0;
+      int known=0,executed=0,reason=0,branch=0,actual_ma=0,actual_sign=0,actual_width=0;
       float target=0,start_target=0,rate=0,rpm=0,battery=0,previous=0,initial=0,goal=0,tau=0,base_prediction=0;
       if(!(std::cin>>now>>side>>baseline>>baseline_ma>>sign>>existing_cap>>allowed>>target
-           >>known>>executed>>actual_ma>>actual_sign>>actual_width
+           >>known>>executed>>reason>>branch>>actual_ma>>actual_sign>>actual_width
            >>start_target>>rate>>rpm>>battery>>previous>>initial>>goal>>tau>>base_prediction))return 1;
       cap.tick(now);
       if(side<0) {
-        decisions.push_back({now,known!=0,executed!=0});
-        cap.negativeDecision(now,known!=0,executed!=0);
+        const auto decision=foot_phase_cap::classifyNegative(known!=0,executed!=0,
+            reason==0,reason==1,static_cast<int16_t>(actual_ma),actual_sign,
+            static_cast<uint16_t>(actual_width),static_cast<uint8_t>(branch));
+        decisions.push_back({now,decision});
+        cap.negativeDecision(now,decision);
       } else if(side>0) {
         ++positive;
         const auto restricted=cap.limit(now,static_cast<uint16_t>(baseline),
@@ -73,6 +77,13 @@ int main() {
         // energy selector. This test only knows the selected cap; it does not
         // assert the resulting motor width without that selector's full state.
         if(allowed && restricted!=baseline) {
+          // A previously recorded phase intervention that matches the new
+          // proposal is still recorded history; confirm it and continue.
+          if(executed && actual_ma==400 && actual_sign==sign && actual_width==restricted) {
+            cap.confirm(now,true,static_cast<int16_t>(actual_ma),actual_sign,
+                        static_cast<uint16_t>(actual_width));
+            continue;
+          }
           // Reconstruct only the local 400mA candidate with the SAME public
           // current table, charge, positiveBoundary and consider helpers used
           // by chooseFootPhaseWidth. The method itself is a private member of

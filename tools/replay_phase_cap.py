@@ -91,9 +91,15 @@ def events_for(h, m, extra_delay, poll_delay):
             # A missing target is deliberately passed as invalid, as at runtime.
             target = 0
         if side == 1:
+            # Later phase-cap versions explicitly record the ordinary choice.
+            # Reusing the already-restricted solver width as the baseline
+            # would silently erase a historical intervention.
+            phase_baseline = number(z.get('foot_phase_baseline_ms'))
             # v1.0.58's low-peak selector logs its ordinary pre-intervention
             # width separately. If it differs from history the C++ replay stops.
-            baseline = number(z.get('low_peak_base_width_ms')) if z.get('low_peak_selected') else number(z.get('solver_selected_integer_width_ms'))
+            baseline = (phase_baseline if phase_baseline > 0 else
+                        number(z.get('low_peak_base_width_ms')) if z.get('low_peak_selected') else
+                        number(z.get('solver_selected_integer_width_ms')))
             if z.get('mpc_alternate'):
                 events.append((t, 2, f'X {t}'))
                 continue
@@ -105,6 +111,11 @@ def events_for(h, m, extra_delay, poll_delay):
         voltage = number(z.get('vbat_mV'))
         allowed = bool(z.get('valid') and z.get('work_control_branch') == 5 and speed_fresh and 7000 <= voltage <= 8120)
         cap = int(number(z.get('work_brake_cap_ms')))
+        if side == 1 and z.get('foot_phase_selected'):
+            # This field reflects the selected restricted candidate, not the
+            # pre-intervention limit. The ordinary choice proves at least its
+            # own width was allowed; the precise larger cap is not logged.
+            cap = max(cap, int(baseline))
         if z.get('low_peak_selected') and isinstance(z.get('low_peak_base_prediction_mj'), (int, float)):
             base_prediction = number(z.get('low_peak_base_prediction_mj'))
         else:
@@ -113,7 +124,8 @@ def events_for(h, m, extra_delay, poll_delay):
                  'pre_input_wheel_speed_rpm', 'vbat_mV', 'previous_peak_amplitude_deg', 'i0_estimated_mA',
                  'predicted_current_goal_mA', 'predicted_current_rise_tau_s')]
         events.append((t, 2, f"Z {t} {side} {int(baseline)} {ma} {sign} {cap} {int(allowed)} {target*1000} "
-                              f"{int(bool(z.get('valid')))} {int(bool(z.get('output_executed')))} {ma} {sign} {width} "
+                              f"{int(bool(z.get('valid')))} {int(bool(z.get('output_executed')))} "
+                              f"{int(number(z.get('reason_code'),-1))} {int(number(z.get('work_control_branch')))} {ma} {sign} {width} "
                               + ' '.join(map(str, model + [base_prediction]))))
     events.sort(key=lambda e: (e[0], e[1]))
     return events

@@ -18,7 +18,7 @@
     </header>
     <section class="panel important">
       <h2>書き込みと測定</h2>
-      <p><strong>公開バージョン：1.0.61</strong>。足マーカの周期的な左右差を、足角度のゼロ点を使わずに観測します。入力調整は試験中で、実機での効果はこれから確認します。</p>
+      <p><strong>公開バージョン：1.0.62</strong>。正常な無入力と失敗を区別して足の左右差調整を行います。調整は試験中で、実機での直進への効果はこれから確認します。</p>
       <p>書き込み時はPCをインターネットにつながるWi-Fiまたは有線LANへ接続し、AtomS3RをUSBでつないでください。PC版ChromeまたはEdgeで下のボタンを押します。機体のWi-Fiへ切り替えるのは書き込み完了後です。</p>
       <esp-web-install-button manifest="manifest-freefoot-runtime-v2.json">
         <button slot="activate" class="primary">左右揺動エネルギー制御を書き込む</button>
@@ -61,6 +61,11 @@
     </section>
 
     <h2>変更履歴</h2>
+    <section class="panel important">
+      <h2>1.0.62：正常な無入力で試験を中断しない</h2>
+      <p>前回の記録では左右差の補正が２回発動した後、正常な無入力を失敗と扱い、通常入力へ戻っていました。正常な無入力と指令失敗・適用範囲外を分け、条件が不明なときは従来どおり試験を中断します。</p>
+      <p>位相観測に限り、校正端から最大3ピクセルの限定外挿を使います。角度の外挿精度は未検証です。通常候補から5 msの試験で、実機の左右差と旋回への効果は未確認です。<a href="https://github.com/temesotejam/atoms3r-lateral-energy-control/blob/main/docs/FOOT_PHASE_CONTROL_062.md">今回の記録と検証内容</a></p>
+    </section>
     <section class="panel important">
       <h2>1.0.61：足角度のゼロ点に依存しない位相比較</h2>
       <p>今回のログでは足角度のゼロ点が確定せず、左右差の補正が発動しませんでした。左右の周期的な動きの比較だけを、検出したマーカ位置と既存の校正式から計算するように変更しました。通常のゼロ基準の足角度表示は従来どおりです。</p>
