@@ -19,12 +19,41 @@ unchanged=['src/lateral_energy_control.h','src/peak_error_adaptation.h',
            'src/previous_peak_control_correction.h','src/control_math_cache.h',
            'src/mekf6.cpp','src/mekf6.hpp',
            'src/upright_reference_store.cpp','src/upright_reference.h']
+def normalize_capped_lateral_energy(source):
+    # Permit only the explicit optional positive-excitation upper bound. The
+    # default stays kMaxMs and reverse/brake limits remain separately guarded.
+    replacements=[
+        ('uint16_t brake_max_ms=kBrakeMaxMs,float prediction_bias_j=0.f,\n'
+         '      uint16_t excitation_max_ms=kMaxMs)',
+         'uint16_t brake_max_ms=kBrakeMaxMs,float prediction_bias_j=0.f)'),
+        ('brake_max_ms>kBrakeMaxMs || excitation_max_ms>kMaxMs)',
+         'brake_max_ms>kBrakeMaxMs)'),
+        ('const uint16_t max_ms=braking?brake_max_ms:excitation_max_ms;',
+         'const uint16_t max_ms=braking?brake_max_ms:kMaxMs;'),
+        ('float initial_current_mA,float goal_current_mA,float prediction_bias_j=0.f,\n'
+         '      uint16_t excitation_max_ms=kMaxMs)',
+         'float initial_current_mA,float goal_current_mA,float prediction_bias_j=0.f)'),
+        ('!std::isfinite(goal_current_mA) || goal_current_mA<=0 || excitation_max_ms>kMaxMs) return d;',
+         '!std::isfinite(goal_current_mA) || goal_current_mA<=0) return d;'),
+        ('const float limit_q=charge(table,excitation_max_ms,initial_current_mA,goal_current_mA);',
+         'const float limit_q=charge(table,kMaxMs,initial_current_mA,goal_current_mA);'),
+        ('uint16_t lo=0,hi=excitation_max_ms;', 'uint16_t lo=0,hi=kMaxMs;'),
+        ('for (uint16_t n : {lo,hi,excitation_max_ms}) {',
+         'for (uint16_t n : {lo,hi,kMaxMs}) {'),
+    ]
+    for current,legacy in replacements:
+        assert source.count(current)==1,('expected capped solver fragment',current)
+        source=source.replace(current,legacy,1)
+    return source
+
 for name in list(allowed)+unchanged:
     before=subprocess.check_output(['git','show',baseline+':'+name],cwd=root).decode().replace('\r\n','\n')
     after=(root/name).read_text(encoding='utf-8')
     for line in allowed.get(name,[]):
         assert after.count(line)==1,(name,line)
         after=after.replace(line,'')
+    if name=='src/lateral_energy_control.h':
+        after=normalize_capped_lateral_energy(after)
     assert before==after,'unauthorized controller change: '+name
 runner_before=subprocess.check_output(['git','show',baseline+':src/experiment_runner.cpp'],cwd=root).decode().replace('\r\n','\n')
 runner_after=(root/'src/experiment_runner.cpp').read_text(encoding='utf-8')
@@ -35,7 +64,18 @@ def legacy_decision(source):
 assert 'const lateral_energy::CurrentTable* selected_current_table = &lateral_current_table_;' in runner_after
 assert 'if (positiveCurrentBatchMode())\n    selectPositiveCurrentBatch(event, selected_current_mA, selected_current_table);' in runner_after
 assert 'if (!positiveCurrentBatchMode() || event.physical_next_peak_side <= 0) return;' in runner_after
-assert legacy_decision(runner_before)==legacy_decision(runner_after).replace('*selected_current_table','lateral_current_table_'), \
+assert ('const uint16_t fallback_positive_cap=walking_positive_cap::fallback(\n'
+        '      work_mode,work_choice.valid,event.physical_next_peak_side,event.target_peak_deg,\n'
+        '      gradual_start_.positiveCapMs(),wheel_speed_balance_.capMs(),lateral_energy::kMaxMs);') in runner_after
+legacy_after=legacy_decision(runner_after).replace('*selected_current_table','lateral_current_table_')
+for capped,legacy in [
+    ('event.integral_energy_j,aligned_initial_mA,goal_current_mA,bias,fallback_positive_cap)',
+     'event.integral_energy_j,aligned_initial_mA,goal_current_mA,bias)'),
+    ('bias,fallback_positive_cap);', 'bias);'),
+]:
+    assert legacy_after.count(capped)==1,('expected capped fallback argument',capped)
+    legacy_after=legacy_after.replace(capped,legacy,1)
+assert legacy_decision(runner_before)==legacy_after, \
     'legacy bridge/quadratic decision changed during inverse-mode addition'
 assert '      observation.position_sequence != last_logged_position_sequence_ ||\n' in runner_after
 assert '  last_logged_position_sequence_ = roller_telemetry.position_sequence;\n' in runner_after
