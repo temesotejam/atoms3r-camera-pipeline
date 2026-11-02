@@ -10,13 +10,14 @@ namespace foot_phase_cap {
 enum class State : uint8_t { Waiting=0, Trial=1, Hold=2, Release=3, Locked=4 };
 enum class Reason : uint8_t { None=0, Stale=1, Invalid=2, InputFailed=3, NegativeLoss=4,
   WeakPeak=5, Worsened=6, Inconclusive=7, Reversed=8, Disallowed=9, TargetChanged=10, ModeChanged=11 };
-enum class NegativeMode : uint8_t { Invalid=0, Coast=1, Powered=2 };
+enum class NegativeMode : uint8_t { Invalid=0, Coast=1, Powered=2, UnmodeledCoast=3 };
 struct NegativeDecision {
   NegativeMode mode=NegativeMode::Invalid;
   int16_t ma=0; int8_t sign=0; uint16_t width=0; uint8_t branch=0;
   bool same(const NegativeDecision& other) const {
     return mode!=NegativeMode::Invalid && mode==other.mode && branch==other.branch &&
-        (mode==NegativeMode::Coast || (ma==other.ma && sign==other.sign && width==other.width));
+        (mode==NegativeMode::Coast || mode==NegativeMode::UnmodeledCoast ||
+         (ma==other.ma && sign==other.sign && width==other.width));
   }
 };
 // Classify only an explicit ordinary no-output result as coast; all failed,
@@ -25,7 +26,7 @@ inline NegativeDecision classifyNegative(bool valid,bool executed,bool reason_no
     int16_t ma,int sign,uint16_t width,uint8_t branch) {
   NegativeDecision d;
   if(valid && branch && !executed && reason_coast && !reason_none && width==0 && ma==0) {
-    d.mode=NegativeMode::Coast;d.branch=branch;
+    d.mode=branch==12 ? NegativeMode::UnmodeledCoast : NegativeMode::Coast;d.branch=branch;
   } else if(valid && branch && executed && reason_none && !reason_coast && width>0 && ma>0 &&
             (sign==1||sign==-1)) {
     d.mode=NegativeMode::Powered;d.ma=ma;d.sign=static_cast<int8_t>(sign);d.width=width;d.branch=branch;
@@ -78,6 +79,9 @@ class Controller {
     if(e>reference_error_+.30f || right<reference_right_-.15f ||
        left+right<reference_total_-.30f) {stop(Reason::Worsened);return;}
     if(!negative.same(reference_negative_)) {
+      // A missing model is not a physical fault and does not by itself stop
+      // balancing. It is also not comparable evidence of improvement.
+      if(negative.mode==NegativeMode::UnmodeledCoast) return;
       if(++noncomparable_count_>=2) stop(Reason::Inconclusive);
       return;
     }

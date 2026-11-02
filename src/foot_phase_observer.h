@@ -23,12 +23,11 @@ class Observer {
 
   // Phase-only fixed-reference angle. Unlike UI foot angles, this never uses
   // the per-boot zero, so a late zero lock cannot step the control signal.
-  // Endpoint extrapolation is limited to 3px of measured support; its
-  // accuracy outside the measured support has not been independently verified.
+  // Use endpoint extrapolation over the full detected image. Values outside
+  // calibration measurements are estimates, not verified angle measurements.
   static bool boundedMarker(bool detected, float x, float minimum, float maximum) {
-    constexpr float margin=3.f;
-    return detected && std::isfinite(x) &&
-           x>=minimum-margin && x<=maximum+margin;
+    (void)minimum; (void)maximum;
+    return detected && std::isfinite(x);
   }
   static float fixedAngle(const foot_calibration::Point* points,float x,float fixed_x) {
     return foot_calibration::angleAt(points,x)-foot_calibration::angleAt(points,fixed_x);

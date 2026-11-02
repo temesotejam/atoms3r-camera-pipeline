@@ -20,6 +20,7 @@
 #include "positive_current_batch.h"
 #include "one_peak_energy_inverse.h"
 #include "wheel_work_energy_control.h"
+#include "unmodeled_walk_coast.h"
 #include "peak_mpc.h"
 
 namespace {
@@ -3721,6 +3722,27 @@ void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(uint32_t t_test_
     work_choice=chooseWheelWork(event,fast_v,&event.rate_support_diagnostic,
         &selected_current_mA,&selected_current_table,
         event.target_peak_deg==8.f && event.physical_next_peak_side>0 ? gradual_start_.positiveCapMs() : 100);
+  // No fitted model covers this negative-side state. Do not invent a
+  // prediction or a pulse: explicitly coast, keep observing the gait and
+  // retain all real hardware, attitude and emergency guards.
+  if(work_mode && event.physical_next_peak_side<0 && !work_choice.valid) {
+    wheel_work_energy_control::State observed{event.zero_cross_abs_rate_dps,
+        event.pre_input_wheel_speed_rpm,static_cast<float>(event.vbat_mV),
+        peak_error_adaptation::speedUsable(event.pre_input_wheel_speed_rpm,
+            event.pre_input_wheel_speed_valid,event.pre_input_wheel_speed_age_us),
+        event.previous_peak_amplitude_deg};
+    observed.absolute_reference=true;observed.target_deg=event.target_peak_deg;
+    const bool safe=!status_.emergency_stop && status_.state==ExperimentState::RUNNING_BATCH_SWEEP &&
+        roller_ && roller_->ok() && imu_ && imu_->acquisitionHealthy() && !imu_->stale(millis()) &&
+        !event.side_mismatch_diagnostic;
+    if(unmodeled_walk_coast::eligible(observed,event.target_energy_j*1000.f,safe)) {
+      event.work_control_branch=12;
+      event.energy_model_extrapolated=true;
+      event.passive_energy_j=NAN;event.free_next_peak_amplitude_deg=NAN;
+      event.valid=true;event.reason=Config::ENERGY_CONTROL_AUTONOMOUS_REASON_VALID_NO_OUTPUT;
+      finishFootEnergyDecision(event,t_test_ms);rearm_for_next_peak();return;
+    }
+  }
   const bool phase_skip_output=work_mode && event.target_peak_deg==8.f && event.physical_next_peak_side>0 &&
       selectFootPhaseOutput(event,t_test_ms,fast_v,work_choice,selected_current_mA,selected_current_table);
   if(phase_skip_output) {

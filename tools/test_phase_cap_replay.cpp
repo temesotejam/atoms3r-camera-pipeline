@@ -1,6 +1,7 @@
 #include "foot_phase_observer.h"
 #include "foot_phase_cap.h"
 #include "wheel_work_energy_control.h"
+#include "unmodeled_walk_coast.h"
 #include <cmath>
 #include <cstdint>
 #include <iostream>
@@ -57,13 +58,22 @@ int main() {
       process(now);
     } else if(op=='Z') {
       int side=0,baseline=0,baseline_ma=0,sign=0,existing_cap=0,allowed=0;
-      int known=0,executed=0,reason=0,branch=0,actual_ma=0,actual_sign=0,actual_width=0;
-      float target=0,start_target=0,rate=0,rpm=0,battery=0,previous=0,initial=0,goal=0,tau=0,base_prediction=0;
+      int known=0,executed=0,reason=0,branch=0,actual_ma=0,actual_sign=0,actual_width=0,speed_fresh=0,mismatch=0;
+      float target=0,target_deg=0,start_target=0,rate=0,rpm=0,battery=0,previous=0,initial=0,goal=0,tau=0,base_prediction=0;
       if(!(std::cin>>now>>side>>baseline>>baseline_ma>>sign>>existing_cap>>allowed>>target
            >>known>>executed>>reason>>branch>>actual_ma>>actual_sign>>actual_width
+           >>speed_fresh>>mismatch>>target_deg
            >>start_target>>rate>>rpm>>battery>>previous>>initial>>goal>>tau>>base_prediction))return 1;
       cap.tick(now);
       if(side<0) {
+        wheel_work_energy_control::State observed(rate,rpm,battery,speed_fresh!=0,previous);
+        observed.absolute_reference=true;observed.target_deg=target_deg;
+        // Old logs cannot establish live hardware health at each event.
+        // This conditional replay assumes the hardware checks are satisfied.
+        if(reason==15 && !executed && actual_width==0 &&
+           unmodeled_walk_coast::eligible(observed,target,mismatch==0)) {
+          known=1;reason=1;branch=12;
+        }
         const auto decision=foot_phase_cap::classifyNegative(known!=0,executed!=0,
             reason==0,reason==1,static_cast<int16_t>(actual_ma),actual_sign,
             static_cast<uint16_t>(actual_width),static_cast<uint8_t>(branch));

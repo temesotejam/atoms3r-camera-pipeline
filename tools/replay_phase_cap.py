@@ -126,6 +126,8 @@ def events_for(h, m, extra_delay, poll_delay):
         events.append((t, 2, f"Z {t} {side} {int(baseline)} {ma} {sign} {cap} {int(allowed)} {target*1000} "
                               f"{int(bool(z.get('valid')))} {int(bool(z.get('output_executed')))} "
                               f"{int(number(z.get('reason_code'),-1))} {int(number(z.get('work_control_branch')))} {ma} {sign} {width} "
+                              f"{int(bool(speed_fresh))} {int(bool(z.get('side_mismatch_diagnostic')))} "
+                              f"{number(z.get('target_peak_deg'))} "
                               + ' '.join(map(str, model + [base_prediction]))))
     events.sort(key=lambda e: (e[0], e[1]))
     return events

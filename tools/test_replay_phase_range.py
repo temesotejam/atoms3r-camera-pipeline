@@ -50,10 +50,10 @@ assert len(sys.argv)==2, 'pass compiled test_foot_phase_run_replay executable'
 base=replay(201.6569+3,203.0819+3)
 assert len(base)==2 and base==replay(201.6569+3,203.0819+3,zero_change=True)
 assert len(replay(63.6918-3,67.5192-3))==2
-assert not replay(201.6569+3.01,203.0819)
-assert not replay(201.6569,203.0819+3.01)
-assert not replay(201.6569+20,203.0819)
-assert not replay(205,203.0) and len(replay(201.0,205))==2
+assert len(replay(201.6569+3.01,203.0819))==2
+assert len(replay(201.6569,203.0819+3.01))==2
+assert len(replay(201.6569+20,203.0819))==2
+assert len(replay(205,203.0))==2 and len(replay(201.0,205))==2
 assert not replay(float('nan'),203.0819)
 assert not replay(201.6569,float('nan'))
 assert not replay(None,203.0819)
@@ -61,4 +61,4 @@ assert not replay(201.6569,203.0819,frame_valid=False)
 assert not replay(201.6569,203.0819,right_reason='ambiguous')
 assert not replay(201.6569,203.0819,timestamp_valid=False)
 assert not replay(201.6569,203.0819,run_id=2)
-print('raw phase replay: boundaries, detection, run/time and zero independence PASS')
+print('raw phase replay: full image, detection, run/time and zero independence PASS')

@@ -111,20 +111,20 @@ int main() {
   assert(o.calibratedFrame(15,2210,false,true,true,true,4,1));
   assert(o.calibratedFrame(15,2310,false,false,true,true,0,0));
   assert(o.count()==0 && !o.valid(2310));
-  // The phase-only exception is precisely bounded in raw pixels and never
-  // accepts a nonfinite value or missing marker detection.
+  // Camera coordinates do not have a calibration-support cutoff; missing
+  // detections and nonfinite values still cannot form observations.
   const float lmin=appcfg::kFootAngleBMinCalXPx, lmax=appcfg::kFootAngleBMaxCalXPx;
   const float rmin=appcfg::kFootAngleAMinCalXPx, rmax=appcfg::kFootAngleAMaxCalXPx;
   auto ok=Observer::boundedMarker;
   assert(ok(true,lmin-3.f,lmin,lmax));
   assert(ok(true,lmax+3.f,lmin,lmax));
-  assert(!ok(true,lmin-3.01f,lmin,lmax));
-  assert(!ok(true,lmax+3.01f,lmin,lmax));
-  assert(!ok(true,lmax+20.f,lmin,lmax));
+  assert(ok(true,lmin-3.01f,lmin,lmax));
+  assert(ok(true,lmax+3.01f,lmin,lmax));
+  assert(ok(true,lmax+20.f,lmin,lmax));
   assert(!ok(true,NAN,lmin,lmax));
   assert(!ok(false,lmax,lmin,lmax));
   assert(ok(true,rmax+3.f,rmin,rmax));
-  assert(!ok(true,rmax+3.01f,rmin,rmax));
+  assert(ok(true,rmax+3.01f,rmin,rmax));
   o.reset(16);
   auto rawCapture=[&](int side,unsigned ms,float lx,float rx,bool detected=true) {
     assert(o.peak(16,side,ms));
@@ -146,7 +146,7 @@ int main() {
   }
   assert(!close(l_expected,25.f*appcfg::kFootAngleBDegPerPx));
   rawCapture(1,3000,lmax+1.f,rmax+3.01f);
-  assert(!o.valid(3110));
+  assert(o.count()==2);
   rawCapture(-1,3400,lmax,rmax,false);
   assert(!o.valid(3510));
   std::cout << "foot phase observer: nearest frame, run timebase, signed motion and incomplete-cycle guards PASS\n";

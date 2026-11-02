@@ -1,6 +1,6 @@
 {
   "name": "AtomS3R Lateral Energy Control",
-  "version": "1.0.62-coast-foot-phase",
+  "version": "1.0.63-continuous-coast",
   "new_install_improv_wait_time": 0,
   "builds": [
     {

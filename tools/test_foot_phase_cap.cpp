@@ -128,6 +128,22 @@ int main(){
   assert(classifyNegative(true,false,false,true,300,-1,0,11).mode==NegativeMode::Invalid);
   assert(classifyNegative(true,false,false,true,0,-1,10,11).mode==NegativeMode::Invalid);
   assert(classifyNegative(true,true,false,true,300,-1,25,10).mode==NegativeMode::Invalid);
+  const auto unmodeled=classifyNegative(true,false,false,true,0,-1,0,12);
+  assert(unmodeled.mode==NegativeMode::UnmodeledCoast);
+  // Missing prediction alone never invalidates feedback or counts as evidence.
+  // Real peak deterioration still immediately releases the restriction.
+  Controller out_of_model;prepare(out_of_model);
+  assert(limit(out_of_model,1850)==75);confirm(out_of_model,1850,75);pair(out_of_model,2600);
+  for(unsigned end=3400;end<=4200;end+=800) {
+    assert(limit(out_of_model,end-750)==75);confirm(out_of_model,end-750,75);
+    out_of_model.negativeDecision(end-350,unmodeled);
+    out_of_model.pair(end,end-800,1.8f,.4f,4.7f,unmodeled,true);
+    assert(out_of_model.state()==State::Trial);
+  }
+  assert(limit(out_of_model,4250)==75);confirm(out_of_model,4250,75);
+  out_of_model.negativeDecision(4600,unmodeled);
+  out_of_model.pair(5000,4200,1.8f,.4f,3.8f,unmodeled,true);
+  assert(out_of_model.state()==State::Release && out_of_model.reason()==Reason::WeakPeak);
   // Two powered baseline cycles must not be pooled with one coast cycle.
   // A lone unmatched coast does not contribute to successful identification;
   // two following *matching* powered cycles can still provide evidence.

@@ -2,6 +2,9 @@
 set -euo pipefail
 python3 tools/embed_runtime_web.py --check
 
+g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_stroke_observer.cpp -o /tmp/test_foot_stroke_observer
+/tmp/test_foot_stroke_observer
+
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_phase_observer.cpp -o /tmp/test_foot_phase_observer
 /tmp/test_foot_phase_observer
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_phase_cap.cpp -o /tmp/test_foot_phase_cap
@@ -28,6 +31,9 @@ g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_balance_adaptive.
 /tmp/test_foot_balance_adaptive
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_energy_balance.cpp -o /tmp/test_foot_energy_balance
 /tmp/test_foot_energy_balance
+
+g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_unmodeled_walk_coast.cpp -o /tmp/test_unmodeled_walk_coast
+/tmp/test_unmodeled_walk_coast
 
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_walking_energy_loss.cpp -o /tmp/test_walking_energy_loss
 /tmp/test_walking_energy_loss
