@@ -32,6 +32,9 @@ g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_balance_adaptive.
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_energy_balance.cpp -o /tmp/test_foot_energy_balance
 /tmp/test_foot_energy_balance
 
+g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_positive_fallback_cap.cpp -o /tmp/test_positive_fallback_cap
+/tmp/test_positive_fallback_cap
+
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_unmodeled_walk_coast.cpp -o /tmp/test_unmodeled_walk_coast
 /tmp/test_unmodeled_walk_coast
 

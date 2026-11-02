@@ -21,6 +21,7 @@
 #include "one_peak_energy_inverse.h"
 #include "wheel_work_energy_control.h"
 #include "unmodeled_walk_coast.h"
+#include "walking_positive_cap.h"
 #include "peak_mpc.h"
 
 namespace {
@@ -3787,6 +3788,11 @@ void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(uint32_t t_test_
   }
   if (work_mode)
     prediction_bias_j=work_choice.valid ? work_choice.applied_bias_mj*.001f : 0.f;
+  const uint16_t fallback_positive_cap=walking_positive_cap::fallback(
+      work_mode,work_choice.valid,event.physical_next_peak_side,event.target_peak_deg,
+      gradual_start_.positiveCapMs(),wheel_speed_balance_.capMs(),lateral_energy::kMaxMs);
+  if(work_mode && !work_choice.valid && event.physical_next_peak_side>0 && event.target_peak_deg==8.f)
+    event.work_brake_cap_ms=fallback_positive_cap;
   one_peak_energy_inverse::Choice inverse_choice;
   audit.solver_started=1; audit.solver_start_us=micros();
   auto decide_selected=[&](float bias) RW_SPEED_CODE {
@@ -3833,12 +3839,12 @@ void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(uint32_t t_test_
     return energy_bridge_enabled_
         ? lateral_energy::decideBridge(lateral_energy_geometry_,*selected_current_table,
             event.physical_next_peak_side,event.zero_cross_abs_rate_dps,event.target_energy_j,
-            event.integral_energy_j,aligned_initial_mA,goal_current_mA,bias)
+            event.integral_energy_j,aligned_initial_mA,goal_current_mA,bias,fallback_positive_cap)
         : lateral_energy::decide(lateral_energy_geometry_,*selected_current_table,
             event.physical_next_peak_side,event.zero_cross_abs_rate_dps,event.target_energy_j,
             event.integral_energy_j,aligned_initial_mA,goal_current_mA,
             event.physical_next_peak_side < 0 ? energy_control_autonomous_brake_max_ms_ : lateral_energy::kBrakeMaxMs,
-            bias);
+            bias,fallback_positive_cap);
   };
   auto decision=decide_selected(prediction_bias_j);
   if (!work_mode && !inverse_negative && decision.valid && prediction_bias_j != 0.f &&

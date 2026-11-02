@@ -126,13 +126,14 @@ struct Decision {
 static inline RW_SPEED_CODE Decision decide(const Geometry& geometry,const CurrentTable& table,
       int8_t side,float rate_dps,float target_j,float integral_j,
       float initial_current_mA,float goal_current_mA,
-      uint16_t brake_max_ms=kBrakeMaxMs,float prediction_bias_j=0.f) {
+      uint16_t brake_max_ms=kBrakeMaxMs,float prediction_bias_j=0.f,
+      uint16_t excitation_max_ms=kMaxMs) {
   Decision d;
   if ((side!=1 && side!=-1) || !table.ready || !std::isfinite(rate_dps) || rate_dps<0 ||
       !std::isfinite(target_j) || target_j<=0 || !std::isfinite(integral_j) ||
       !std::isfinite(prediction_bias_j) ||
       !std::isfinite(initial_current_mA) || !std::isfinite(goal_current_mA) || goal_current_mA<=0 ||
-      brake_max_ms>kBrakeMaxMs)
+      brake_max_ms>kBrakeMaxMs || excitation_max_ms>kMaxMs)
     return d;
   const auto c=coefficients(side);
   const float omega=rate_dps*kRadPerDeg;
@@ -151,7 +152,7 @@ static inline RW_SPEED_CODE Decision decide(const Geometry& geometry,const Curre
   d.unclamped_deficit_j=raw;
   d.unclamped_q_mAs=requiredSignedCharge(c,omega,raw);
   const bool braking=raw<0;
-  const uint16_t max_ms=braking?brake_max_ms:kMaxMs;
+  const uint16_t max_ms=braking?brake_max_ms:excitation_max_ms;
   const float signed_goal=braking?-goal_current_mA:goal_current_mA;
   const float limit_q=charge(table,max_ms,initial_current_mA,signed_goal);
   if (!std::isfinite(limit_q)) return d;
@@ -242,12 +243,13 @@ static inline RW_SPEED_CODE float bridgeArrivalEnergy(const Geometry& geometry,i
 // because the 0.47.31 gain did not identify reverse-command response.
 static inline RW_SPEED_CODE Decision decideBridge(const Geometry& geometry,const CurrentTable& table,
       int8_t side,float rate_dps,float target_j,float integral_j,
-      float initial_current_mA,float goal_current_mA,float prediction_bias_j=0.f) {
+      float initial_current_mA,float goal_current_mA,float prediction_bias_j=0.f,
+      uint16_t excitation_max_ms=kMaxMs) {
   Decision d;
   if ((side!=1 && side!=-1) || !table.ready || !std::isfinite(rate_dps) || rate_dps<0 ||
       !std::isfinite(target_j) || target_j<=0 || !std::isfinite(integral_j) ||
       !std::isfinite(prediction_bias_j) || !std::isfinite(initial_current_mA) ||
-      !std::isfinite(goal_current_mA) || goal_current_mA<=0) return d;
+      !std::isfinite(goal_current_mA) || goal_current_mA<=0 || excitation_max_ms>kMaxMs) return d;
   const auto c=bridgeCoefficients(side);
   const float free_angle=bridgeFreeAngle(side,rate_dps);
   const float outer_angle=geometry.outer_angle/kRadPerDeg;
@@ -272,7 +274,7 @@ static inline RW_SPEED_CODE Decision decideBridge(const Geometry& geometry,const
   const float raw_target=target_j+correction-prediction_bias_j;
   d.unclamped_q_mAs=raw_target>=d.free_j && raw_target<=support_energy
       ? (angle(geometry,raw_target)-free_angle)/c.gain_deg_per_mAs : NAN;
-  const float limit_q=charge(table,kMaxMs,initial_current_mA,goal_current_mA);
+  const float limit_q=charge(table,excitation_max_ms,initial_current_mA,goal_current_mA);
   if (!std::isfinite(limit_q)) return d;
   d.available_q_mAs=std::fmax(0.f,std::fmin(limit_q,
       (outer_angle-free_angle)/c.gain_deg_per_mAs));
@@ -286,14 +288,14 @@ static inline RW_SPEED_CODE Decision decideBridge(const Geometry& geometry,const
   d.valid=true;
   const float requested=std::fmin(d.requested_q_mAs,d.available_q_mAs);
   if (requested<=0) return d;
-  uint16_t lo=0,hi=kMaxMs;
+  uint16_t lo=0,hi=excitation_max_ms;
   while (hi-lo>1) {
     const uint16_t mid=static_cast<uint16_t>((lo+hi)/2);
     ++d.evaluations;
     if (charge(table,mid,initial_current_mA,goal_current_mA)<requested) lo=mid;
     else hi=mid;
   }
-  for (uint16_t n : {lo,hi,kMaxMs}) {
+  for (uint16_t n : {lo,hi,excitation_max_ms}) {
     ++d.evaluations;
     const float q=charge(table,n,initial_current_mA,goal_current_mA);
     if (q<0 || q>d.available_q_mAs) continue;
