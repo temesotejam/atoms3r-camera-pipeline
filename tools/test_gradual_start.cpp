@@ -5,6 +5,19 @@
 int main() {
   gradual_start::Controller c;
   assert(c.target()==4.5f && c.positiveCapMs()==80);
+  // Positive pitch is the provisional physical-left hypothesis; the 8-degree
+  // preset and negative side stay unchanged. The positive bias starts at
+  // zero and increases continuously across the existing startup ramp.
+  assert(gradual_start::sideTargetDeg(4.5f,1)==4.5f);
+  assert(gradual_start::sideTargetDeg(8.f,1)==10.f);
+  assert(gradual_start::sideTargetDeg(8.f,-1)==8.f);
+  assert(std::fabs(gradual_start::sideTargetDeg(6.25f,1)-7.25f)<1e-6f);
+  assert(!c.positivePeakAtLeast(8.f,1000));
+  c.peak(1,7.9f,200,true,1000);assert(!c.positivePeakAtLeast(8.f,1001));
+  c.peak(1,8.1f,200,true,1100);assert(c.positivePeakAtLeast(8.f,1500));
+  assert(!c.positivePeakAtLeast(8.f,2601));assert(!c.positivePeakAtLeast(8.f,1099));
+  c.peak(1,8.1f,200,false,1500);assert(!c.positivePeakAtLeast(8.f,1500));
+  c.reset();
   auto pair=[&](unsigned t,float a,float b,float rpm){c.peak(1,a,rpm,true,t);c.peak(-1,b,rpm,true,t+400);};
   pair(1000,4.3f,4.2f,450);assert(c.target()==4.5f);
   pair(2000,4.3f,4.2f,450);assert(c.target()==4.5f);

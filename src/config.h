@@ -313,6 +313,10 @@ static constexpr int8_t ENERGY_CONTROL_AUTONOMOUS_NORMAL_OUTPUT_SIGN = -1;
 static constexpr int16_t ENERGY_CONTROL_AUTONOMOUS_CURRENT_MA = 300;
 static constexpr uint16_t ENERGY_CONTROL_AUTONOMOUS_MIN_PULSE_MS = 0;
 static constexpr uint16_t ENERGY_CONTROL_AUTONOMOUS_MAX_PULSE_MS = 100;
+// User-selected 8-degree walking experiment limits. Other autonomous modes
+// continue using their own previously configured limits.
+static constexpr uint16_t WALKING_TARGET8_MAX_PULSE_MS = 150;
+static constexpr int16_t WALKING_TARGET8_MAX_CURRENT_MA = 500;
 // Stop before the CAD arc's nominal 17.46-degree outer contact limit.
 static constexpr float ENERGY_CONTROL_AUTONOMOUS_FIXED_TEST_STOP_ABS_DEG = 16.0f;
 

@@ -22,6 +22,7 @@
 #include "foot_fullstride_observer.h"
 #include "foot_span_control.h"
 #include "weak_side_assist.h"
+#include "positive_left_boost.h"
 #include "target12_state_work.h"
 #include "peak_error_adaptation.h"
 #include "upright_reference.h"
@@ -163,6 +164,8 @@ private:
   foot_fullstride_observer::Observer foot_span_observer_;
   foot_span_control::Controller foot_span_control_;
   weak_side_assist::Controller weak_side_assist_;
+  positive_left_boost::Controller positive_left_boost_;
+  positive_left_boost::Input positive_left_input_;
   struct PhaseNegativePeak { uint32_t ms=0; float amplitude=NAN; };
   struct PhaseNegativeDecision { uint32_t ms=0; foot_phase_cap::NegativeDecision value; };
   struct SpanPositiveDecision {
@@ -420,6 +423,9 @@ private:
       PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
       const wheel_work_energy_control::Choice& normal,bool unmodeled_coast,
       uint32_t t_test_ms,float fast_v);
+  bool __attribute__((noinline)) tryPositiveLeftBoost(
+      PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
+      const wheel_work_energy_control::Choice& normal,uint32_t t_test_ms);
   void __attribute__((noinline)) choosePeakMpc(PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
       float fast_v,wheel_work_energy_control::Choice& choice,int16_t& current,
       const lateral_energy::CurrentTable*& table) const;
