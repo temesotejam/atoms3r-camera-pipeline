@@ -34,14 +34,14 @@ class Controller {
     // A different ordinary selector is not a hardware fault. Carry no pending
     // request; the same learned offset may be used once a candidate can be
     // formed and a fresh new observation is available.
-    pending_=false;request_eligible_=false;have_time_=true;last_limit_=now;state_=State::Collect;return true;
+    (void)now;pending_=false;request_eligible_=false;trial_active_=false;state_=State::Collect;return true;
   }
   bool cancelUnsent(uint16_t baseline) {
     (void)baseline;
     if(fault())return false;
     // Candidate not sent: restore the ordinary selector; do not pretend that
     // its resulting command tested the requested experimental width.
-    pending_=false;request_changed_=false;offset_ms_=0;requested_=baseline;
+    pending_=false;request_changed_=false;offset_ms_=0;requested_=baseline;trial_active_=false;have_observation_=false;
     pending_change_=confirmed_offset_!=0;
     consecutive_=0;last_usable_end_=0;have_reference_=false;state_=State::Collect;return true;
   }
@@ -53,7 +53,7 @@ class Controller {
        !std::isfinite(c.left) || !std::isfinite(c.right) || c.left<0 || c.right<0 ||
        !std::isfinite(c.negative_peak) || c.negative_peak<=0 ||
        !std::isfinite(c.target_mj) || c.target_mj<=0) {
-      consecutive_=0;return;
+      invalidateObservation();return;
     }
     const Actual* action=nullptr;unsigned actions=0;
     for(unsigned i=0;i<actual_count_;++i) {
@@ -63,61 +63,83 @@ class Controller {
     if(actions!=1 || !action || action->ms!=c.positive_ms || !action->executed ||
        action->ma!=c.positive_ma || action->sign!=c.positive_sign ||
        action->width!=c.positive_width || !std::isfinite(action->target_mj) ||
-       std::fabs(action->target_mj-c.target_mj)>.001f) {consecutive_=0;return;}
+       std::fabs(action->target_mj-c.target_mj)>.001f) {invalidateObservation();return;}
     // Each actual command retains the input-change and feedback-change
     // timestamps that were known at that instant. Future ordinary commands
     // must not retrospectively invalidate this earlier camera cycle.
     // An older feedback generation after a new intervention is not a
     // response to the new intervention and must not increment it again.
-    if(action->mode_generation!=mode_generation_ ||
-       action->feedback_changed_ms!=last_feedback_changed_ms_)return;
+    if(action->feedback_changed_ms!=last_feedback_changed_ms_)return;
     const bool continuous=last_usable_end_ && c.start_ms==last_usable_end_;
     consecutive_=continuous?consecutive_+1:1;last_usable_end_=c.end_ms;
-    const float e=c.left-c.right, magnitude=std::fabs(e);
-    if(!have_reference_) {filtered_error_=e;reference_peak_=c.negative_peak;
-      reference_left_=c.left;reference_right_=c.right;have_reference_=true;last_error_magnitude_=magnitude;return;}
+    // Normalize asymmetry so shrinking both feet cannot look like progress.
+    // A small constant avoids unstable division when both signals are small;
+    // the camera width is not an absolute ground stride.
+    if(c.left+c.right<.3f) {invalidateObservation();return;}
+    const float e=(c.left-c.right)/(c.left+c.right+.1f);
+    observed_left_=c.left;observed_right_=c.right;observed_peak_=c.negative_peak;
+    observed_error_=e;observed_current_=c.positive_ma;observed_target_=c.target_mj;
+    observed_baseline_=action->baseline;
+    have_observation_=true;
+    if(!have_reference_) {
+      filtered_error_=e;reference_peak_=c.negative_peak;
+      reference_left_=c.left;reference_right_=c.right;have_reference_=true;return;
+    }
     filtered_error_=.5f*filtered_error_+.5f*e;
     if(offset_ms_==0) {
       reference_peak_=.8f*reference_peak_+.2f*c.negative_peak;
       reference_left_=.8f*reference_left_+.2f*c.left;
       reference_right_=.8f*reference_right_+.2f*c.right;
     }
-    // A pending offset must first be applied and confirmed before any newer
-    // observation is allowed to accumulate another increment.
     if(pending_change_ || consecutive_<2 ||
        (action->feedback_changed_ms && c.start_ms<=action->feedback_changed_ms))return;
-    // These safeguards guard observed loss of oscillation, not evidence of
-    // contact or real-world walking performance. Two bad cycles avoid a
-    // single camera glitch instantly suppressing adaptation.
-    const bool both_collapsed=(reference_left_+reference_right_>.4f) &&
-        c.left<.35f*reference_left_ && c.right<.35f*reference_right_;
-    if(c.negative_peak<reference_peak_-.8f || both_collapsed)++weak_count_;
-    else weak_count_=0;
+    // Capture two complete observations after the actual changed command.
+    // Negative-side input/contact can change too: this is trend evidence,
+    // never a claim that the pulse caused the measured difference.
+    if(trial_active_) {
+      const int base_delta=static_cast<int>(action->baseline)-static_cast<int>(trial_baseline_);
+      if(!trial_reference_valid_ || c.positive_ma!=trial_current_ || std::fabs(c.target_mj-trial_target_)>.05f ||
+         base_delta>5 || base_delta< -5) {
+        invalidateObservation();return;
+      }
+      const float weak=trial_right_?c.right:c.left;
+      trial_ratio_sum_+=std::fabs(e);trial_weak_sum_+=weak;trial_peak_sum_+=c.negative_peak;
+      if(++trial_count_<2)return;
+      const float ratio=trial_ratio_sum_*.5f,weak_mean=trial_weak_sum_*.5f,peak=trial_peak_sum_*.5f;
+      trial_active_=false;
+      const bool weak_kept=weak_mean>=trial_weak_*.8f && weak_mean>=trial_weak_-.10f;
+      const bool peak_kept=peak>=trial_peak_*.85f && peak>=trial_peak_-.5f;
+      // No clear ratio improvement, loss of the smaller foot, or loss of
+      // negative oscillation: unwind this offset step and explore oppositely.
+      if(!weak_kept || !peak_kept || ratio+.02f>=trial_ratio_) {
+        polarity_=-polarity_;
+        const int restored=towardZero(offset_ms_);
+        state_=restored==0?State::Collect:State::Restore;
+        if(restored!=offset_ms_){offset_ms_=restored;pending_change_=true;}
+        return;
+      }
+    }
+    // Maintain a weaker-side/peak guard even after the offset reaches a cap.
+    const float weak=reference_right_<=reference_left_?c.right:c.left;
+    const float refweak=std::fmin(reference_left_,reference_right_);
+    const bool weak_loss=weak<refweak*.8f && weak<refweak-.05f;
+    const bool peak_loss=c.negative_peak<reference_peak_-.5f;
+    if(weak_loss || peak_loss)++weak_count_;else weak_count_=0;
     if(weak_count_>=2) {
+      weak_count_=0;polarity_=-polarity_;
       const int restored=towardZero(offset_ms_);
-      state_=restored==0?State::Collect:State::Restore;weak_count_=0;
+      state_=restored==0?State::Collect:State::Restore;
       if(restored!=offset_ms_) {offset_ms_=restored;pending_change_=true;}
       return;
     }
-    // Accumulate small successive worsening, not only a single large jump.
-    // The same signed trend is required twice so one noisy frame does not
-    // automatically reverse the control polarity.
-    const float delta=magnitude-last_error_magnitude_;
-    if(delta>0.f) {worse_accum_+=delta;++worse_count_;}
-    else {worse_count_=0;worse_accum_=std::fmax(0.f,worse_accum_+delta);}
-    last_error_magnitude_=magnitude;
-    if(worse_count_>=2 && worse_accum_>=.20f && offset_ms_!=0) {
-      polarity_=-polarity_;worse_count_=0;worse_accum_=0.f;
-    }
-    // +/-0.15 degree is a temporary deadband, NOT a support cutoff. On an
-    // exact balance we retain the correction and continue observing.
-    if(std::fabs(filtered_error_)<=.15f){state_=State::Hold;return;}
+    if(std::fabs(filtered_error_)<=.10f){state_=State::Hold;return;}
     const int step=(filtered_error_>0.f ? 1 : -1)*polarity_*10;
     const int proposal=offset_ms_+step;
     const int bounded=proposal < -30 ? -30 : proposal > 30 ? 30 : proposal;
     state_=bounded<0?State::ProbeMinus:bounded>0?State::ProbePlus:State::Collect;
     if(bounded!=offset_ms_) {offset_ms_=bounded;pending_change_=true;}
   }
+
   uint16_t limit(uint32_t now,uint16_t baseline,int16_t ma,int sign,
                  uint16_t existing_cap,bool allowed,float target_mj) {
     const uint16_t cap=existing_cap<100?existing_cap:100;
@@ -144,10 +166,8 @@ class Controller {
     // opposite sign improves gait. Never exceed one 10ms feedback step.
     if(pending_change_ && confirmed_offset_==0 && offset_ms_==10 && safe==cap && safe>=20) {
       polarity_=-polarity_;offset_ms_=-10;state_=State::ProbeMinus;
-      worse_count_=0;worse_accum_=0.f;
     } else if(pending_change_ && confirmed_offset_==0 && offset_ms_==-10 && safe==10 && cap>=20) {
       polarity_=-polarity_;offset_ms_=10;state_=State::ProbePlus;
-      worse_count_=0;worse_accum_=0.f;
     }
     int wanted=static_cast<int>(safe)+offset_ms_;
     // Anti-windup: a correction blocked by a physical cap is not an
@@ -166,52 +186,63 @@ class Controller {
     requested_=static_cast<uint16_t>(wanted);
     request_changed_=requested_!=safe;
     pending_=request_changed_;
-    have_time_=true;last_limit_=now;
     return requested_;
   }
   void confirm(uint32_t now,bool executed,int16_t ma,int sign,uint16_t width) {
     Actual& a=actual_[actual_next_];a.ms=now;a.width=width;a.ma=ma;a.sign=sign;
-    a.executed=executed;a.target_mj=request_target_mj_;
+    a.executed=executed;a.target_mj=request_target_mj_;a.baseline=baseline_ms_;
     actual_next_=(actual_next_+1)%8;if(actual_count_<8)++actual_count_;
     if(pending_ && (!executed || ma!=request_ma_ || sign!=1 || width!=requested_)) {
       state_=State::Fault;pending_=false;return;
     }
     if(executed && supportedCurrent(ma) && sign==1 && width>0) {
-      const bool changed=!last_actual_valid_ || last_actual_ma_!=ma || last_actual_sign_!=sign || width!=last_actual_width_;
       const bool applied_feedback=pending_change_ && request_eligible_ &&
           ma==request_ma_ && sign==1 && width==requested_ && offset_ms_!=confirmed_offset_;
-      // Track all actual width/current changes, while distinguishing changes
-      // in the experimental feedback offset from ordinary baseline updates.
-      if(changed)last_changed_ms_=now;
-      if(applied_feedback){last_feedback_changed_ms_=now;confirmed_offset_=offset_ms_;++updates_;}
+      // Count only confirmed feedback transitions.
+      if(applied_feedback){
+        last_feedback_changed_ms_=now;confirmed_offset_=offset_ms_;++updates_;
+        trial_active_=offset_ms_!=0 && have_observation_;
+        if(trial_active_) {
+          trial_ratio_=std::fabs(observed_error_);
+          trial_right_=observed_right_<=observed_left_;
+          trial_weak_=trial_right_?observed_right_:observed_left_;
+          trial_peak_=observed_peak_;trial_current_=ma;trial_target_=request_target_mj_;trial_baseline_=baseline_ms_;
+          const int before_delta=static_cast<int>(observed_baseline_)-static_cast<int>(baseline_ms_);
+          trial_reference_valid_=observed_current_==ma && std::fabs(observed_target_-request_target_mj_)<=.05f &&
+              before_delta<=5 && before_delta>= -5;
+          trial_ratio_sum_=trial_weak_sum_=trial_peak_sum_=0.f;trial_count_=0;
+        }
+      }
       if(request_eligible_ && ma==request_ma_ && sign==1 && width==requested_)pending_change_=false;
-      last_actual_width_=width;last_actual_ma_=ma;last_actual_sign_=sign;last_actual_valid_=true;
-    } else if(executed && width>0) {
-      const bool changed=!last_actual_valid_ || last_actual_ma_!=ma || last_actual_sign_!=sign || width!=last_actual_width_;
-      if(changed)last_changed_ms_=now;
-      last_actual_width_=width;last_actual_ma_=ma;last_actual_sign_=sign;last_actual_valid_=true;
-    } else {
-      if(last_actual_valid_)last_changed_ms_=now;
-      last_actual_valid_=false;
     }
-    a.input_changed_ms=last_changed_ms_;a.feedback_changed_ms=last_feedback_changed_ms_;
-    a.mode_generation=mode_generation_;
+    a.feedback_changed_ms=last_feedback_changed_ms_;
     pending_=false;
   }
  private:
+  void invalidateObservation() {
+    consecutive_=0;have_observation_=false;
+    if(trial_active_) {
+      trial_active_=false;const int restored=towardZero(offset_ms_);
+      if(restored!=offset_ms_){offset_ms_=restored;pending_change_=true;state_=State::Restore;}
+    }
+  }
   static bool supportedCurrent(int16_t ma){return ma==300 || ma==350 || ma==400;}
   static int towardZero(int value){return value>10?value-10:value< -10?value+10:0;}
-  struct Actual {uint32_t ms=0,input_changed_ms=0,feedback_changed_ms=0,mode_generation=0;
-    uint16_t width=0;int16_t ma=0;int sign=0;bool executed=false;float target_mj=NAN;};
+  struct Actual {uint32_t ms=0,feedback_changed_ms=0;
+    uint16_t width=0,baseline=0;int16_t ma=0;int8_t sign=0;bool executed=false;float target_mj=NAN;};
   Actual actual_[8];unsigned actual_next_=0,actual_count_=0;
   State state_=State::Collect;
-  uint32_t last_end_=0,last_usable_end_=0,last_changed_ms_=0,last_feedback_changed_ms_=0,last_limit_=0,mode_generation_=0;
-  uint16_t baseline_ms_=0,requested_=0,last_actual_width_=0;
-  int16_t request_ma_=0,last_actual_ma_=0;
-  int last_actual_sign_=0;
-  float request_target_mj_=NAN,filtered_error_=0,reference_peak_=0,reference_left_=0,reference_right_=0,last_error_magnitude_=0,worse_accum_=0;
+  uint32_t last_end_=0,last_usable_end_=0,last_feedback_changed_ms_=0;
+  uint16_t baseline_ms_=0,requested_=0;
+  int16_t request_ma_=0;
+  float request_target_mj_=NAN,filtered_error_=0,reference_peak_=0,reference_left_=0,reference_right_=0;
+  float observed_left_=0,observed_right_=0,observed_peak_=0,observed_error_=0,observed_target_=0;
+  float trial_ratio_=0,trial_weak_=0,trial_peak_=0,trial_target_=0;
+  float trial_ratio_sum_=0,trial_weak_sum_=0,trial_peak_sum_=0;
+  int16_t observed_current_=0,trial_current_=0;uint16_t observed_baseline_=0,trial_baseline_=0;unsigned trial_count_=0;
+  bool have_observation_=false,trial_active_=false,trial_right_=true,trial_reference_valid_=false;
   int offset_ms_=0,confirmed_offset_=0,polarity_=-1;
-  unsigned consecutive_=0,weak_count_=0,worse_count_=0,updates_=0;
-  bool have_reference_=false,last_actual_valid_=false,pending_=false,request_changed_=false,pending_change_=false,have_time_=false,request_eligible_=false;
+  unsigned consecutive_=0,weak_count_=0,updates_=0;
+  bool have_reference_=false,pending_=false,request_changed_=false,pending_change_=false,request_eligible_=false;
 };
 }
