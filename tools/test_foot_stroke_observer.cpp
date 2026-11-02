@@ -29,9 +29,57 @@ int main() {
   assert(opposite.kind==Kind::BackToForward && near(opposite.width,5));
   assert(opposite.from_ms==20 && opposite.to_ms==40);
 
-  // No forward sign means no invented movement; invalid configuration is
-  // visible to the caller instead of guessing from observed trajectories.
-  Observer unknown(0,.5f,500);
+  // Undefined sign produces directionless full spans, but NEVER calls the
+  // first center-to-extremum movement a full span or a forward movement.
+  Observer ul(0,.5f,500),ur(0,.5f,500);
+  ul.observe(0,100,true);ur.observe(0,-10,true);
+  ul.observe(10,102,true);ur.observe(10,-12,true);
+  assert(ul.observe(20,101.4f,true).kind==Kind::None);
+  assert(ur.observe(20,-11.4f,true).kind==Kind::None);
+  ul.observe(30,98,true); ur.observe(30,-8,true);
+  auto uleft=ul.observe(40,98.6f,true);
+  auto uright=ur.observe(40,-8.6f,true);
+  assert(uleft.kind==Kind::DirectionlessSpan && uright.kind==Kind::DirectionlessSpan);
+  assert(near(uleft.width,4) && near(uright.width,4));
+  assert(uleft.from_ms==10 && uleft.to_ms==30 && uleft.confirmed_ms==40);
+  assert(uleft.direction==Direction::Decreasing && uright.direction==Direction::Increasing);
+  Pairer unsigned_pair; unsigned_pair.left(uleft); unsigned_pair.right(uright);
+  auto symmetric=unsigned_pair.take(40,100,20);
+  assert(symmetric.valid && near(symmetric.difference,0));
+
+  // Unequal full spans are compared in the common input coordinate unit.
+  Observer unequal(0,.5f,500);
+  unequal.observe(0,0,true); unequal.observe(10,3,true); unequal.observe(20,2.4f,true);
+  unequal.observe(30,-3,true); auto six=unequal.observe(40,-2.4f,true);
+  unsigned_pair.left(six); unsigned_pair.right(uright);
+  auto different=unsigned_pair.take(40,100,20);
+  assert(different.valid && near(different.difference,2));
+  unsigned_pair.left(full); unsigned_pair.right(uright);
+  assert(!unsigned_pair.take(70,100,100).valid); // mixed event semantics
+
+  // A slowly drifting camera is intentionally NOT removed: successive raw
+  // spans differ by direction. Calling them ground-relative strides would be
+  // an unjustified interpretation.
+  Observer drift(0,.5f,500);
+  drift.observe(0,0,true);drift.observe(10,2.2f,true);drift.observe(20,1.6f,true);
+  drift.observe(30,-1.6f,true); auto down=drift.observe(40,-1.f,true);
+  drift.observe(50,2.6f,true); auto up=drift.observe(60,2.f,true);
+  assert(down.kind==Kind::DirectionlessSpan && near(down.width,3.8f));
+  assert(up.kind==Kind::DirectionlessSpan && near(up.width,4.2f));
+  assert(down.direction==Direction::Decreasing && up.direction==Direction::Increasing);
+
+  // Missing observations invalidate the old extremum. After re-acquisition
+  // the first partial movement is discarded until two new extrema exist.
+  Observer missing(0,.5f,100);
+  missing.observe(0,0,true);missing.observe(10,2,true);missing.observe(20,1.4f,true);
+  missing.observe(25,NAN,false);
+  missing.observe(30,-2,true);missing.observe(40,2,true);
+  assert(missing.observe(50,1.4f,true).kind==Kind::None);
+  missing.observe(60,-2,true);
+  assert(missing.observe(70,-1.4f,true).kind==Kind::DirectionlessSpan);
+
+  // Out-of-domain sign values remain invalid rather than guessed.
+  Observer unknown(2,.5f,500);
   assert(unknown.observe(0,0,true).kind==Kind::None);
   assert(unknown.status()==Status::InvalidConfiguration);
   Observer bad_threshold(1,0.f,500);
