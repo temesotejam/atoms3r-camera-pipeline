@@ -69,7 +69,7 @@ class Controller {
 
   // Feed each confirmed physical peak, including the opposite-side peak.
   // Current is acknowledged at send time; this is not measured motor torque.
-  void peak(int side,uint32_t ms,float angle,bool fresh) {
+  __attribute__((noinline)) void peak(int side,uint32_t ms,float angle,bool fresh) {
     if(!pending_)return;
     if(!fresh || !std::isfinite(angle) || angle<=0.f || angle>=16.f ||
        ms<=command_ms_ || ms-command_ms_>1800 ||
