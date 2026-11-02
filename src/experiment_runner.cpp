@@ -2949,6 +2949,22 @@ void ExperimentRunner::recordFootPhasePeak(int8_t physical_side,uint32_t peak_ms
   processFootPhaseCycle(millis()-run_start_ms_);
   processFootSpanCycle();
 }
+float ExperimentRunner::energyControlPeakTarget(int8_t physical_side) const {
+  return energy_control_autonomous_pending_peak_ &&
+      physical_side == energy_control_autonomous_pending_next_side_ && std::isfinite(energy_control_autonomous_pending_target_deg_)
+      ? energy_control_autonomous_pending_target_deg_
+      : (wheelWorkMode() && energy_control_autonomous_target_peak_deg_==8.f
+          ? gradual_start::sideTargetDeg(gradual_start_.target(),physical_side)
+          : energy_control_autonomous_target_peak_deg_);
+}
+void ExperimentRunner::notifyPositiveLeftPeak(
+    int8_t physical_side,uint32_t peak_ms,float amplitude_deg,
+    const PsramLogger::EnergyControlAutonomousPeakEvent& event) {
+  if(wheelWorkMode() && energy_control_autonomous_target_peak_deg_==8.f)
+    positive_left_boost_.peak(physical_side,peak_ms,amplitude_deg,
+        imu_ && imu_->acquisitionHealthy() && !imu_->stale(millis()) &&
+        event.peak_speed_valid && event.peak_speed_age_us<=30000);
+}
 bool ExperimentRunner::recordEnergyControlAutonomousPeak(uint32_t peak_ms, int8_t physical_side,
                                                             float amplitude_deg, float detector_peak_angle_deg) {
   if (!logger_ || physical_side == 0 || !isfinite(amplitude_deg) || !isfinite(detector_peak_angle_deg) ||
@@ -2972,12 +2988,7 @@ bool ExperimentRunner::recordEnergyControlAutonomousPeak(uint32_t peak_ms, int8_
   event.peak_amplitude_deg = amplitude_deg;
   if(wheelWorkMode() && energy_control_autonomous_target_peak_deg_==8.f) wheel_speed_balance_.peak(physical_side,amplitude_deg);
   event.detector_peak_angle_deg = detector_peak_angle_deg;
-  event.target_peak_deg = energy_control_autonomous_pending_peak_ &&
-      physical_side == energy_control_autonomous_pending_next_side_ && isfinite(energy_control_autonomous_pending_target_deg_)
-      ? energy_control_autonomous_pending_target_deg_
-      : (wheelWorkMode() && energy_control_autonomous_target_peak_deg_==8.f
-          ? gradual_start::sideTargetDeg(gradual_start_.target(),physical_side)
-          : energy_control_autonomous_target_peak_deg_);
+  event.target_peak_deg = energyControlPeakTarget(physical_side);
   event.peak_error_deg = event.target_peak_deg - event.peak_amplitude_deg;
   event.first_peak = first_peak;
   event.pending_command_matched = energy_control_autonomous_pending_peak_ &&
@@ -3003,10 +3014,7 @@ bool ExperimentRunner::recordEnergyControlAutonomousPeak(uint32_t peak_ms, int8_
   if(wheelWorkMode() && energy_control_autonomous_target_peak_deg_==8.f)
     gradual_start_.peak(physical_side,amplitude_deg,event.peak_wheel_speed_rpm,
         event.peak_speed_valid && event.peak_speed_age_us<=30000,peak_ms);
-  if(wheelWorkMode() && energy_control_autonomous_target_peak_deg_==8.f)
-    positive_left_boost_.peak(physical_side,peak_ms,amplitude_deg,
-        imu_ && imu_->acquisitionHealthy() && !imu_->stale(millis()) &&
-        event.peak_speed_valid && event.peak_speed_age_us<=30000);
+  notifyPositiveLeftPeak(physical_side,peak_ms,amplitude_deg,event);
   if(wheelWorkMode() && energy_control_autonomous_target_peak_deg_==8.f && physical_side<0)
     low_peak_feedback_.negative(peak_ms,amplitude_deg,event.peak_speed_valid && event.peak_speed_age_us<=30000);
   event.energy_error_j = event.target_energy_j - event.measured_energy_j;

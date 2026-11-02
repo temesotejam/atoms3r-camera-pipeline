@@ -396,6 +396,10 @@ private:
                                                 float rate_dps);
   bool RW_SPEED_CODE recordEnergyControlAutonomousPeak(uint32_t peak_ms, int8_t physical_side,
                                          float amplitude_deg, float detector_peak_angle_deg);
+  float __attribute__((noinline)) energyControlPeakTarget(int8_t physical_side) const;
+  void __attribute__((noinline)) notifyPositiveLeftPeak(
+      int8_t physical_side,uint32_t peak_ms,float amplitude_deg,
+      const PsramLogger::EnergyControlAutonomousPeakEvent& event);
   void RW_SPEED_CODE updateEnergyControlAutonomousAtZeroCross(uint32_t t_test_ms, float rate_dps,
                                                  float detector_before_deg,
                                                  float detector_after_deg,

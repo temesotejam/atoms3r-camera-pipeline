@@ -20,11 +20,12 @@ normal_start = 'if(event.work_control_branch!=14 && positive_left_input_.now_ms=
 normal_end = 'event.pulse_width_ms,event.q_command_direction,event.valid && event.output_executed);'
 assert runner.count(normal_start) == 1 and runner.count(normal_end) == 1
 normal = normal_start + runner.split(normal_start, 1)[1].split(normal_end, 1)[0] + normal_end
-peak_start = 'if(wheelWorkMode() && energy_control_autonomous_target_peak_deg_==8.f)\n    positive_left_boost_.peak('
-peak_end = 'event.peak_speed_valid && event.peak_speed_age_us<=30000);'
-assert runner.count(peak_start) == 1
-peak_after = runner.split(peak_start, 1)[1]
-peak = peak_start + peak_after.split(peak_end, 1)[0] + peak_end
+helper_start = 'float ExperimentRunner::energyControlPeakTarget('
+helper_end = '\nbool ExperimentRunner::recordEnergyControlAutonomousPeak('
+assert runner.count(helper_start) == 1 and runner.count(helper_end) == 1
+helper = helper_start + runner.split(helper_start, 1)[1].split(helper_end, 1)[0]
+assert 'positive_left_boost_.peak(' in helper
+assert 'event.peak_speed_valid && event.peak_speed_age_us<=30000' in helper
 
 # An exploratory pulse owns its half-cycle and must not seed the established
 # model with a prediction at an untested current/duration.
@@ -36,6 +37,8 @@ caller = runner.split('tryPositiveLeftBoost(event,work_choice,t_test_ms)) {', 1)
 assert 'finishFootEnergyDecision(event,t_test_ms);\n    if(!event.output_executed)rearm_for_next_peak();\n    return;' in caller
 record = runner.split('bool ExperimentRunner::recordEnergyControlAutonomousPeak(', 1)[1].split(
     '\nvoid ExperimentRunner::', 1)[0]
+assert 'energyControlPeakTarget(physical_side)' in record
+assert 'notifyPositiveLeftPeak(physical_side,peak_ms,amplitude_deg,event)' in record
 assert '!energy_control_autonomous_pending_probe_' in record
 assert 'std::isfinite(energy_control_autonomous_pending_model_energy_j_)' in record
 begin = runner.split('bool ExperimentRunner::beginEnergyControlAutonomousPulse(', 1)[1].split(
@@ -47,7 +50,7 @@ assert 'pulse_width_ms < 1 || pulse_width_ms > permitted_ms' in begin
 assert 'status_.pulse_active' in begin and 'status_.emergency_stop' in begin
 assert 'roller_->setCurrentMa(command_current_mA)' in begin
 
-for marker, replacement in [('// METHOD_SOURCE', method), ('// NORMAL_SOURCE', normal), ('// PEAK_SOURCE', peak)]:
+for marker, replacement in [('// METHOD_SOURCE', method), ('// NORMAL_SOURCE', normal), ('// HELPER_SOURCE', helper)]:
     assert fixture.count(marker) == 1
     fixture = fixture.replace(marker, replacement)
 with tempfile.TemporaryDirectory(prefix='positive_boost_runner_') as td:

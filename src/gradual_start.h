@@ -11,7 +11,7 @@ namespace gradual_start {
 // Provisional mounting hypothesis: positive pitch is physical left. Keep the
 // 8-degree preset and start ramp, adding up to 2 degrees only to that side.
 // This is a requested target, not a prediction or an observed amplitude.
-inline float sideTargetDeg(float ramp_deg,int side) {
+inline __attribute__((noinline)) float sideTargetDeg(float ramp_deg,int side) {
   const float progress=std::fmax(0.f,std::fmin(1.f,(ramp_deg-4.5f)/3.5f));
   return ramp_deg+(side>0?2.f*progress:0.f);
 }
@@ -19,7 +19,7 @@ class Controller {
  public:
   void reset() { *this=Controller{}; }
   float target() const {return target_;}
-  bool positivePeakAtLeast(float target_deg,uint32_t now_ms) const {
+  bool __attribute__((noinline)) positivePeakAtLeast(float target_deg,uint32_t now_ms) const {
     return std::isfinite(target_deg) && std::isfinite(positive_peak_) && positive_peak_ms_ &&
         now_ms>=positive_peak_ms_ && now_ms-positive_peak_ms_<=1500 && positive_peak_>=target_deg;
   }

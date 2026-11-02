@@ -7,11 +7,11 @@ namespace wheel_speed_balance {
 class Controller {
  public:
   void reset() { *this=Controller{}; }
-  void peak(int side,float angle) {
+  void __attribute__((noinline)) peak(int side,float angle) {
     if(!std::isfinite(angle)) return;
     if(side>0) positive_peak_=angle; else if(side<0) negative_peak_=angle;
   }
-  void crossing(int side,float rpm,bool fresh,uint32_t ms) {
+  void __attribute__((noinline)) crossing(int side,float rpm,bool fresh,uint32_t ms) {
     if(!fresh || !std::isfinite(rpm)) { reset(); return; }
     if(side<0) { negative_rpm_=rpm;negative_ms_=ms;have_negative_=true;return; }
     if(side!=1) return;

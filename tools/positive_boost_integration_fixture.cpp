@@ -1,6 +1,7 @@
 #include "positive_left_boost.h"
 #include "wheel_work_energy_control.h"
 #include "peak_error_adaptation.h"
+#include "gradual_start.h"
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -13,6 +14,7 @@ constexpr uint8_t ENERGY_CONTROL_AUTONOMOUS_REASON_NONE=0;
 enum class ExperimentState { RUNNING_BATCH_SWEEP, STOPPED };
 uint32_t millis(){return 123456;}
 namespace PsramLogger {
+struct EnergyControlAutonomousPeakEvent {bool peak_speed_valid;uint32_t peak_speed_age_us;};
 struct EnergyControlAutonomousZeroCrossEvent {
   uint32_t previous_peak_time_ms=800,zero_cross_time_ms=997;
   int8_t physical_next_peak_side=1,previous_peak_side=-1,q_command_direction=0;
@@ -38,11 +40,13 @@ struct FakeRoller {bool good=true;bool ok()const{return good;}};
 struct FakeFoot {bool good=true;unsigned calls=0;bool selectorUnavailable(uint32_t){++calls;return good;}};
 struct FakeAdaptive {bool broken=false;void breakPair(){broken=true;}};
 struct Status {bool emergency_stop=false,pulse_active=false;ExperimentState state=ExperimentState::RUNNING_BATCH_SWEEP;float current_audit_q_target_mA_s=0,current_audit_q_pred_mA_s=0;};
+struct FakeGradual {float target()const{return 8.f;}};
 class ExperimentRunner {
  public:
   Status status_;FakeImu imu_obj;FakeRoller roller_obj;FakeFoot foot_span_control_;FakeAdaptive adaptive_cg_;
   FakeImu* imu_=&imu_obj;FakeRoller* roller_=&roller_obj;
   positive_left_boost::Input positive_left_input_;positive_left_boost::Controller positive_left_boost_;
+  FakeGradual gradual_start_;float energy_control_autonomous_target_peak_deg_=8.f;
   float run_cg_shift_mm_=0,pending_cg_shift_mm_=0,pending_target_energy_j_=NAN;
   bool energy_control_autonomous_pending_peak_=false,energy_control_autonomous_pending_probe_=false;
   int8_t energy_control_autonomous_pending_next_side_=0;
@@ -63,16 +67,19 @@ class ExperimentRunner {
   }
   bool tryPositiveLeftBoost(PsramLogger::EnergyControlAutonomousZeroCrossEvent&,
                             const wheel_work_energy_control::Choice&,uint32_t);
+  float energyControlPeakTarget(int8_t physical_side)const;
+  void notifyPositiveLeftPeak(int8_t physical_side,uint32_t peak_ms,float amplitude_deg,
+                             const PsramLogger::EnergyControlAutonomousPeakEvent& event);
   void normalConfirmation(PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,uint32_t t_ms) {
     // NORMAL_SOURCE
   }
   void feedPeak(int8_t physical_side,uint32_t peak_ms,float amplitude_deg,bool valid) {
-    struct Peak {bool peak_speed_valid;uint32_t peak_speed_age_us;} event{valid,valid?100u:999999u};
-    const uint16_t energy_control_autonomous_target_peak_deg_=8;
-    // PEAK_SOURCE
+    PsramLogger::EnergyControlAutonomousPeakEvent event{valid,valid?100u:999999u};
+    notifyPositiveLeftPeak(physical_side,peak_ms,amplitude_deg,event);
   }
 };
 // METHOD_SOURCE
+// HELPER_SOURCE
 using Event=PsramLogger::EnergyControlAutonomousZeroCrossEvent;
 static wheel_work_energy_control::Choice normal() {
   wheel_work_energy_control::Choice n;n.valid=true;n.command_sign=1;n.current_ma=400;
@@ -107,6 +114,10 @@ static Event trial(ExperimentRunner& r,uint32_t now,uint16_t expected_width,uint
   return e;
 }
 int main() {
+  {ExperimentRunner r;assert(r.energyControlPeakTarget(1)==10.f);
+   assert(r.energyControlPeakTarget(-1)==8.f);r.energy_control_autonomous_pending_peak_=true;
+   r.energy_control_autonomous_pending_next_side_=1;r.energy_control_autonomous_pending_target_deg_=9.f;
+   assert(r.energyControlPeakTarget(1)==9.f&&r.energyControlPeakTarget(-1)==8.f);}
   {ExperimentRunner r;seed(r);trial(r,2600,100);
    r.status_.pulse_active=false;Event no=sample(2600);assert(!r.tryPositiveLeftBoost(no,normal(),2600));
    r.feedPeak(1,2800,5.5f,true);r.feedPeak(-1,3200,4.8f,true);

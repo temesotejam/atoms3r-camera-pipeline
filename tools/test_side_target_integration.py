@@ -26,9 +26,11 @@ pending='energy_control_autonomous_pending_target_deg_ = work_mode && event.targ
 assert pending in runner
 peak=runner.split('bool ExperimentRunner::recordEnergyControlAutonomousPeak(',1)[1].split(
     '\nvoid ExperimentRunner::',1)[0]
-assert 'physical_side == energy_control_autonomous_pending_next_side_' in peak
-assert '? energy_control_autonomous_pending_target_deg_' in peak
-assert 'gradual_start::sideTargetDeg(gradual_start_.target(),physical_side)' in peak
+assert 'energyControlPeakTarget(physical_side)' in peak
+target=runner.split('float ExperimentRunner::energyControlPeakTarget(',1)[1].split('\n}',1)[0]
+assert 'physical_side == energy_control_autonomous_pending_next_side_' in target
+assert '? energy_control_autonomous_pending_target_deg_' in target
+assert 'gradual_start::sideTargetDeg(gradual_start_.target(),physical_side)' in target
 assert 'state.target_deg=event.target_peak_deg;' in runner
 feedback=runner.split('void ExperimentRunner::observeWheelWorkPeak(',1)[1].split(
     '\nvoid ExperimentRunner::captureWheelWorkDecision(',1)[0]
