@@ -31,10 +31,9 @@ class Controller {
   int offset()const{return offset_ms_;}
   bool selectorUnavailable(uint32_t now) {
     if(fault())return false;
-    // A different ordinary selector is not a hardware fault. Carry no pending
-    // request; the same learned offset may be used once a candidate can be
-    // formed and a fresh new observation is available.
-    (void)now;pending_=false;request_eligible_=false;trial_active_=false;state_=State::Collect;return true;
+    // A different selector is not a hardware fault. Cancel experimental
+    // feedback and reacquire observation before trying another candidate.
+    (void)now;invalidateObservation();pending_=false;request_eligible_=false;return true;
   }
   bool cancelUnsent(uint16_t baseline) {
     (void)baseline;
@@ -156,8 +155,13 @@ class Controller {
       state_=State::Collect;return safe;
     }
     request_eligible_=true;
+    // A candidate proposed from an older camera cycle must not be submitted
+    // after a missing/invalid observation. Ordinary output remains available.
+    if(!have_observation_ && offset_ms_!=0)invalidateObservation();
     if(last_usable_end_ && (now<last_usable_end_ || now-last_usable_end_>2500)) {
-      offset_ms_=towardZero(offset_ms_);state_=State::Restore;pending_change_=true;
+      // Stale camera data cannot justify retaining any experimental offset.
+      // Continue with the ordinary selector while observations reacquire.
+      invalidateObservation();
     }
     if(!last_usable_end_)return safe;
     // If a newly requested first step has no room in that direction, try the
@@ -220,11 +224,11 @@ class Controller {
   }
  private:
   void invalidateObservation() {
-    consecutive_=0;have_observation_=false;
-    if(trial_active_) {
-      trial_active_=false;const int restored=towardZero(offset_ms_);
-      if(restored!=offset_ms_){offset_ms_=restored;pending_change_=true;state_=State::Restore;}
-    }
+    // Drop both an active trial and a proposal not yet sent. Keeping the
+    // proposal after clearing the reference would issue an untracked pulse.
+    consecutive_=0;have_observation_=false;trial_active_=false;offset_ms_=0;
+    pending_change_=confirmed_offset_!=0;
+    state_=pending_change_?State::Restore:State::Collect;
   }
   static bool supportedCurrent(int16_t ma){return ma==300 || ma==350 || ma==400;}
   static int towardZero(int value){return value>10?value-10:value< -10?value+10:0;}

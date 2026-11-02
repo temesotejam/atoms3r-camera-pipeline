@@ -74,31 +74,38 @@ inline Choice choose(const Input& in) {
 class Controller {
  public:
   void reset() { *this=Controller{}; }
-  void interrupt() { pending_=false; trend_=0; }
+  void interrupt() {
+    pending_=false;stable_count_=0;down_count_=0;
+    if(trial_) {limit_ms_=rollback_ms_;trial_=false;}
+  }
   uint16_t limitMs() const { return limit_ms_; }
 
   Choice propose(const Input& in) {
     observe(in);
     Choice out=choose(in);
-    if(out.selected && out.width_ms>limit_ms_)out.width_ms=limit_ms_;
+    if(out.selected) {
+      // At the final target, a confirmed experiment can exceed the initial
+      // deficit formula while staying within the physical hardware cap.
+      if(exploring_ && in.active_target_deg>=7.95f)
+        out.width_ms=limit_ms_<in.hardware_max_width_ms ? limit_ms_ : in.hardware_max_width_ms;
+      else if(out.width_ms>limit_ms_)out.width_ms=limit_ms_;
+    }
+    proposed_ms_=out.selected?out.width_ms:0;proposed_at_=in.now_ms;
     return out;
   }
 
-  // Call only after the command was accepted by the actuator interface.
-  // Record the pre-command observation and time, not a predicted next peak.
+  // Call only after the actuator interface accepted this exact proposal.
   void confirm(const Input& in, uint16_t actual_width_ms) {
     pending_=false;
     const Choice candidate=choose(in);
     if(!candidate.selected || actual_width_ms==0 ||
-       actual_width_ms>candidate.width_ms || actual_width_ms>limit_ms_ ||
-       in.last_negative_peak_ms>=in.now_ms) {trend_=0;return;}
-    before_=in.last_negative_peak_deg;
-    target_=in.active_target_deg;
-    opposite_=in.last_positive_peak_deg;
-    rpm_=in.wheel_rpm;
-    command_ms_=in.now_ms;
-    prior_peak_ms_=in.last_negative_peak_ms;
-    pending_=true;
+       proposed_at_!=in.now_ms || actual_width_ms!=proposed_ms_ ||
+       actual_width_ms>limit_ms_ || actual_width_ms>in.hardware_max_width_ms ||
+       in.last_negative_peak_ms>=in.now_ms) {interrupt();return;}
+    before_=in.last_negative_peak_deg;target_=in.active_target_deg;
+    opposite_=in.last_positive_peak_deg;rpm_=in.wheel_rpm;
+    command_ms_=in.now_ms;prior_peak_ms_=in.last_negative_peak_ms;
+    applied_limit_=actual_width_ms==limit_ms_;pending_=true;
   }
 
  private:
@@ -114,20 +121,55 @@ class Controller {
        in.last_negative_peak_ms<=prior_peak_ms_ || in.last_negative_peak_ms>=in.now_ms ||
        std::fabs(in.active_target_deg-target_)>.05f ||
        std::fabs(in.last_positive_peak_deg-opposite_)>.6f ||
-       std::fabs(in.wheel_rpm-rpm_)>100.f) {trend_=0;return;}
+       std::fabs(in.wheel_rpm-rpm_)>100.f) {interrupt();return;}
     const float delta=in.last_negative_peak_deg-before_;
-    // Require persistent trends so a single noisy peak does not drive an
-    // adjustment. This is a cautious heuristic, not causal identification.
-    if(delta<-.15f) trend_=trend_<0 ? trend_-1 : -1;
-    else if(delta>.15f) trend_=trend_>0 ? trend_+1 : 1;
-    else trend_=0;
-    if(trend_<=-2) {limit_ms_=limit_ms_>30 ? limit_ms_-10 : 20;trend_=0;}
-    else if(trend_>=3) {limit_ms_=limit_ms_<65 ? limit_ms_+5 : 70;trend_=0;}
+    const bool evaluating_trial=trial_;
+    if(trial_ && !applied_limit_) {interrupt();return;}
+    if(trial_ && applied_limit_) {
+      ++trial_samples_;
+      if(in.last_negative_peak_deg<trial_reference_-.35f)++bad_count_;
+      else bad_count_=0;
+      if(bad_count_>=2) {
+        limit_ms_=rollback_ms_;trial_=false;stable_count_=0;
+        cooldown_=4;return;
+      }
+      if(trial_samples_>=3 && bad_count_==0)trial_=false;
+    }
+    // Preserve the existing pre-trial trend guard: two successive sizeable
+    // drops reduce the permitted width. This is an observation heuristic,
+    // not proof that the prior input caused the drops.
+    if(!evaluating_trial) {
+      if(delta<-.15f)++down_count_;else down_count_=0;
+      if(down_count_>=2) {
+        limit_ms_=limit_ms_>30?limit_ms_-10:20;
+        down_count_=stable_count_=0;cooldown_=4;return;
+      }
+    }
+    if(cooldown_){--cooldown_;stable_count_=0;return;}
+    // Wait until the start ramp reaches the 8-degree preset. Require actual
+    // at-cap pulses and several comparable peaks remaining at least 1 degree
+    // short. These observations do not identify the effect of extra input.
+    if(!applied_limit_ || in.active_target_deg<7.95f ||
+       in.last_negative_peak_deg>=in.active_target_deg-1.f || std::fabs(delta)>.2f) {
+      stable_count_=0;return;
+    }
+    if(!stable_count_ || std::fabs(in.last_negative_peak_deg-stable_base_)>.35f) {
+      stable_base_=in.last_negative_peak_deg;stable_sum_=in.last_negative_peak_deg;stable_count_=1;
+    } else {stable_sum_+=in.last_negative_peak_deg;++stable_count_;}
+    if(stable_count_>=3 && !trial_ && limit_ms_<70 &&
+       in.hardware_max_width_ms>limit_ms_) {
+      rollback_ms_=limit_ms_;trial_reference_=stable_sum_/stable_count_;
+      limit_ms_=static_cast<uint16_t>(limit_ms_+5);
+      if(limit_ms_>70)limit_ms_=70;
+      if(limit_ms_>in.hardware_max_width_ms)limit_ms_=in.hardware_max_width_ms;
+      trial_=true;exploring_=true;trial_samples_=bad_count_=stable_count_=0;
+    }
   }
   float before_=0.f,target_=0.f,opposite_=0.f,rpm_=0.f;
-  uint32_t command_ms_=0,prior_peak_ms_=0;
-  uint16_t limit_ms_=30;
-  int8_t trend_=0;
-  bool pending_=false;
+  float stable_base_=0.f,stable_sum_=0.f,trial_reference_=0.f;
+  uint32_t command_ms_=0,prior_peak_ms_=0,proposed_at_=0;
+  uint16_t limit_ms_=30,rollback_ms_=30,proposed_ms_=0;
+  uint8_t stable_count_=0,trial_samples_=0,bad_count_=0,cooldown_=0,down_count_=0;
+  bool pending_=false,applied_limit_=false,trial_=false,exploring_=false;
 };
 }

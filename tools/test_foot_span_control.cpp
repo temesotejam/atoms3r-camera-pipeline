@@ -53,6 +53,49 @@ int main(){
   tick(missing,300,2.5,1.1);tick(missing,400,2.5,1.1,5,100,100,30,false);
   assert(missing.offset()==0 && !missing.fault());assert(tick(missing,500,3,1)==100);
   tick(missing,600,3,1);tick(missing,700,3,1);assert(!missing.fault());
+  // 42830511 sequence: a valid cycle proposes a new -20ms offset, then an
+  // edge-unverified cycle arrives before its positive command. That unsent
+  // candidate must be discarded instead of sent without a reference. Exact
+  // 22017/22737/23476 cycle boundaries and 22220/23697 positive times come
+  // from the log; the values are constructed to exercise this state path.
+  Controller pending_invalid;
+  tick(pending_invalid,21617,3,1);tick(pending_invalid,21717,3,1);
+  tick(pending_invalid,21817,2.5f,1.1f);tick(pending_invalid,21917,2.5f,1.1f);
+  assert(pending_invalid.limit(22220,100,400,1,100,true,1.f)==90);
+  pending_invalid.confirm(22220,true,400,1,90);
+  Cycle prior;prior.start_ms=22017;prior.end_ms=22737;prior.positive_ms=22220;
+  prior.left=2.5f;prior.right=1.1f;prior.negative_peak=5;prior.target_mj=1;
+  prior.negative_key=1;prior.positive_width=90;prior.positive_ma=400;prior.positive_sign=1;
+  prior.complete=prior.negative_known=prior.positive_executed=true;
+  pending_invalid.cycle(prior); // analogous to the 23296ms event snapshot
+  assert(pending_invalid.offset()==-20 && pending_invalid.acceptedProbeCycles()==1);
+  Cycle invalid;invalid.start_ms=22737;invalid.end_ms=23476;invalid.complete=false;
+  pending_invalid.cycle(invalid);
+  assert(pending_invalid.offset()==0 && !pending_invalid.fault());
+  assert(pending_invalid.limit(23697,100,400,1,100,true,1.f)==100);
+  pending_invalid.confirm(23697,true,400,1,100);
+  Cycle restored;restored.start_ms=23476;restored.end_ms=24205;restored.positive_ms=23697;
+  restored.left=3;restored.right=1;restored.negative_peak=5;restored.target_mj=1;
+  restored.negative_key=1;restored.positive_width=100;restored.positive_ma=400;
+  restored.positive_sign=1;restored.complete=restored.negative_known=restored.positive_executed=true;
+  pending_invalid.cycle(restored);
+  assert(tick(pending_invalid,24205,3,1)==100);
+  assert(pending_invalid.offset()==-10);
+  assert(tick(pending_invalid,24305,3,1)==90 && !pending_invalid.fault());
+  // Selector changes have the same discard/reacquire behavior.
+  Controller selector;tick(selector,100,3,1);tick(selector,200,3,1);
+  assert(selector.offset()==-10 && selector.selectorUnavailable(250));
+  assert(selector.offset()==0 && !selector.fault());
+  assert(tick(selector,300,3,1)==100);
+  // Stale observations while a -30ms offset is applied must immediately
+  // restore the whole offset, not transmit another residual -20ms pulse.
+  Controller stale;tick(stale,100,3,1);tick(stale,200,3,1);
+  tick(stale,300,2.5f,1.1f);tick(stale,400,2.5f,1.1f);tick(stale,500,2.5f,1.1f);
+  tick(stale,600,2.2f,1.2f);tick(stale,700,2.2f,1.2f);tick(stale,800,2.2f,1.2f);
+  assert(stale.offset()==-30 && tick(stale,900,2.2f,1.2f)==70);
+  assert(stale.limit(3601,100,400,1,100,true,1.f)==100);
+  assert(stale.offset()==0 && !stale.fault());
+  stale.confirm(3601,true,400,1,100);assert(!stale.fault());
   // The ordinary selector can jump or change current without the experiment
   // asserting a hardware fault. Incomparable observations undo the pending
   // candidate and later valid data may restart it.

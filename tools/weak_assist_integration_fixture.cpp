@@ -29,7 +29,7 @@ struct EnergyControlAutonomousZeroCrossEvent {
 struct FakeImu {bool good=true;bool acquisitionHealthy()const{return good;}bool stale(uint32_t)const{return !good;}};
 struct FakeRoller {bool good=true;bool ok()const{return good;}};
 struct FakeFeedback {bool broken=false;void interrupt(){broken=true;}void breakPair(){broken=true;}};
-struct FakeGradual {float target()const{return 5.5f;}};
+struct FakeGradual {float value=5.5f;float target()const{return value;}};
 struct Status {bool emergency_stop=false,pulse_active=false;ExperimentState state=ExperimentState::RUNNING_BATCH_SWEEP;float current_audit_q_target_mA_s=0,current_audit_q_pred_mA_s=0;};
 class ExperimentRunner {
 public:
@@ -86,6 +86,18 @@ int main(){
   assert(!r.energy_control_autonomous_pending_peak_&&!r.status_.pulse_active);}
  {ExperimentRunner r;configure(r);Event e;r.lateral_current_table_=lateral_energy::CurrentTable{};
   assert(!r.tryWeakSideAssist(e,coast,false,21726,7.87f)&&r.call_count==0);}
+ // The extracted production method must actually submit a higher exploratory
+ // pulse after three time-matched plateau observations at the 8-degree goal.
+ // Fixed inputs here test the control path, not the robot's physical response.
+ {ExperimentRunner r;configure(r);r.gradual_start_.value=8.f;
+  for(unsigned i=0;i<4;++i) {
+   const uint32_t now=21726+i*800;
+   if(i) {r.phase_negative_peaks_[i+1].ms=now-500;r.phase_negative_peaks_[i+1].amplitude=3.44f;}
+   r.status_.pulse_active=false;Event e;e.previous_peak_time_ms=now-150;e.zero_cross_time_ms=now-3;
+   assert(r.tryWeakSideAssist(e,coast,false,now,7.87f));
+   assert(e.output_executed&&e.pulse_width_ms==(i<3?30:35));
+   assert(e.work_brake_cap_ms==(i<3?30:35));
+  }}
  // Exercise the actual runner method across three negative crossings. The
  // first two *confirmed* commands are followed by fresh falling peaks under
  // comparable conditions; the third command must use the new 20ms limit.
