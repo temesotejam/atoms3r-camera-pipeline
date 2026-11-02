@@ -61,7 +61,7 @@ header = converter.parse_header(data)
 metadata = converter.expand_tables(json.loads(data[110:110+header['metadata_json_size']], parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value))))
 assert metadata['metadata_json_final_bytes'] == header['metadata_json_size']
 assert not metadata['metadata_event_detail_truncated']
-assert metadata['firmware_revision']=='1.0.72-negative-duration-trial'
+assert metadata['firmware_revision']=='1.0.73-tilt-priority'
 for manifest in ('site/manifest.json','site/manifest-freefoot-runtime-v2.json'):
     cfg=json.loads(Path(manifest).read_text())
     assert cfg['version']==metadata['firmware_revision']
@@ -272,6 +272,10 @@ for work_first, suffix in ((False, '.fallback-first.rwlog'), (True, '.work-first
     assert work_metadata['energy_control_autonomous_brake_width_max_ms'] == 70
     assert work_metadata['energy_control_autonomous_integral_Ki_plus_J_per_J'] == 0
     assert work_metadata['wheel_work_positive_current_candidates_mA'] == [300,350,400]
+    assert work_metadata['tilt_priority']['branch'] == 15
+    assert work_metadata['tilt_priority']['command_mA'] == 1200
+    assert work_metadata['tilt_priority']['max_width_ms'] == 150
+    assert work_metadata['tilt_priority']['hardware_validated'] is False
     assert work_metadata['metadata_json_final_bytes'] == work_header['metadata_json_size']
     assert not work_metadata['metadata_event_detail_truncated']
     work_rows = work_metadata['energy_control_autonomous_zero_cross_events']
@@ -281,14 +285,21 @@ for work_first, suffix in ((False, '.fallback-first.rwlog'), (True, '.work-first
         assert abs(event['cg_shift_mm']-(.35 if index%2 else -.15))<1e-6
         assert event['work_model_weight'] == (.75 if index%2 else 1)
         walking = index == 255
-        fallback = not walking and ((index % 3 == 0) != work_first)
-        cross_condition = walking or (not fallback and index % 4 == 1)
+        experimental = index in (252,253,254)
+        fallback = not walking and not experimental and ((index % 3 == 0) != work_first)
+        cross_condition = walking or experimental or (not fallback and index % 4 == 1)
         if index % 2 == 0:
             assert event['work_bias_samples'] == 2
         assert event['event_index'] == index + 1
         assert event['energy_model_extrapolated'] == (fallback or cross_condition)
         assert event['work_prediction_cross_condition'] == cross_condition
-        if fallback:
+        if experimental:
+            expected = ('weak_side_assist_v1_unmodeled', 'positive_asymmetry_unmodeled_trial',
+                        'symmetric_tilt_priority_unmodeled_trial')[index-252]
+            assert event['work_control_branch'] == index-239
+            assert event['arrival_energy_model_revision'] is None
+            assert event['free_model_revision'] == expected
+        elif fallback:
             assert event['arrival_energy_model_revision'] is None
         elif walking:
             assert event['arrival_energy_model_revision'] == 'walking_coast_eight_runs_v6'

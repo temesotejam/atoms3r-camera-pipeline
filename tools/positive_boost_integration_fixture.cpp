@@ -1,4 +1,5 @@
 #include "positive_left_boost.h"
+#include "tilt_priority.h"
 #include "wheel_work_energy_control.h"
 #include "peak_error_adaptation.h"
 #include "gradual_start.h"
@@ -46,6 +47,7 @@ class ExperimentRunner {
   Status status_;FakeImu imu_obj;FakeRoller roller_obj;FakeFoot foot_span_control_;FakeAdaptive adaptive_cg_;
   FakeImu* imu_=&imu_obj;FakeRoller* roller_=&roller_obj;
   positive_left_boost::Input positive_left_input_;positive_left_boost::Controller positive_left_boost_;
+  tilt_priority::Controller tilt_priority_;
   FakeGradual gradual_start_;float energy_control_autonomous_target_peak_deg_=8.f;
   float run_cg_shift_mm_=0,pending_cg_shift_mm_=0,pending_target_energy_j_=NAN;
   bool energy_control_autonomous_pending_peak_=false,energy_control_autonomous_pending_probe_=false;
@@ -114,7 +116,7 @@ static Event trial(ExperimentRunner& r,uint32_t now,int expected_ma,uint16_t exp
   return e;
 }
 int main() {
-  {ExperimentRunner r;assert(r.energyControlPeakTarget(1)==10.f);
+  {ExperimentRunner r;assert(r.energyControlPeakTarget(1)==8.f);
    assert(r.energyControlPeakTarget(-1)==8.f);r.energy_control_autonomous_pending_peak_=true;
    r.energy_control_autonomous_pending_next_side_=1;r.energy_control_autonomous_pending_target_deg_=9.f;
    assert(r.energyControlPeakTarget(1)==9.f&&r.energyControlPeakTarget(-1)==8.f);}

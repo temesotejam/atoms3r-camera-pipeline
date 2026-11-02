@@ -9,6 +9,9 @@ python3 tools/test_weak_assist_integration.py
 python3 tools/test_side_target_integration.py
 python3 tools/test_positive_boost_integration.py
 python3 tools/test_walking_pulse_limits.py
+g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_tilt_priority.cpp -o /tmp/test_tilt_priority
+/tmp/test_tilt_priority
+python3 tools/test_tilt_priority_integration.py
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_positive_left_boost.cpp -o /tmp/test_positive_left_boost
 /tmp/test_positive_left_boost
 

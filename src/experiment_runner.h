@@ -23,6 +23,7 @@
 #include "foot_span_control.h"
 #include "weak_side_assist.h"
 #include "positive_left_boost.h"
+#include "tilt_priority.h"
 #include "target12_state_work.h"
 #include "peak_error_adaptation.h"
 #include "upright_reference.h"
@@ -165,6 +166,7 @@ private:
   foot_span_control::Controller foot_span_control_;
   weak_side_assist::Controller weak_side_assist_;
   positive_left_boost::Controller positive_left_boost_;
+  tilt_priority::Controller tilt_priority_;
   positive_left_boost::Input positive_left_input_;
   struct PhaseNegativePeak { uint32_t ms=0; float amplitude=NAN; };
   struct PhaseNegativeDecision { uint32_t ms=0; foot_phase_cap::NegativeDecision value; };
@@ -430,6 +432,8 @@ private:
   bool __attribute__((noinline)) tryPositiveLeftBoost(
       PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
       const wheel_work_energy_control::Choice& normal,uint32_t t_test_ms);
+  bool __attribute__((noinline)) tryTiltPriority(
+      PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,uint32_t t_test_ms);
   void __attribute__((noinline)) choosePeakMpc(PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
       float fast_v,wheel_work_energy_control::Choice& choice,int16_t& current,
       const lateral_energy::CurrentTable*& table) const;

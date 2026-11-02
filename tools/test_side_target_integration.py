@@ -25,7 +25,7 @@ assert 'energyControlPeakTarget(physical_side)' in peak
 target=runner.split('float ExperimentRunner::energyControlPeakTarget(',1)[1].split('\n}',1)[0]
 assert 'physical_side == energy_control_autonomous_pending_next_side_' in target
 assert '? energy_control_autonomous_pending_target_deg_' in target
-assert 'gradual_start::sideTargetDeg(gradual_start_.target(),physical_side)' in target
+assert ': energy_control_autonomous_target_peak_deg_' in target
 assert 'state.target_deg=event.target_peak_deg;' in runner
 feedback=runner.split('void ExperimentRunner::observeWheelWorkPeak(',1)[1].split(
     '\nvoid ExperimentRunner::captureWheelWorkDecision(',1)[0]
@@ -39,7 +39,7 @@ fixture=r'''#include "gradual_start.h"
 #include <iostream>
 namespace PsramLogger { struct EnergyControlAutonomousZeroCrossEvent {
  int8_t physical_next_peak_side=0;
- float target_energy_j=0,foot_balance_target_deg=0,foot_energy_bias=0,
+ float target_peak_deg=8, target_energy_j=0,foot_balance_target_deg=0,foot_energy_bias=0,
  foot_energy_left_px=0,foot_energy_right_px=0,low_peak_bias_mj=0;
  bool foot_energy_valid=false,low_peak_active=false;
  int foot_energy_phase=0,foot_energy_reason=0;
@@ -58,14 +58,14 @@ class ExperimentRunner {public:
 int main(){
  ExperimentRunner r;PsramLogger::EnergyControlAutonomousZeroCrossEvent e;
  e.physical_next_peak_side=1;r.applyFootEnergyTarget(e,100);
- assert(std::fabs(e.foot_balance_target_deg-10)<1e-6f);
- assert(std::fabs(e.target_energy_j-.100f)<1e-6f);
+ assert(std::fabs(e.foot_balance_target_deg-8)<1e-6f);
+ assert(std::fabs(e.target_energy_j-.064f)<1e-6f);
  e.physical_next_peak_side=-1;r.applyFootEnergyTarget(e,100);
  assert(std::fabs(e.foot_balance_target_deg-8)<1e-6f);
  assert(std::fabs(e.target_energy_j-.064f)<1e-6f);
  r.gradual_start_.value=4.5f;e.physical_next_peak_side=1;r.applyFootEnergyTarget(e,100);
- assert(std::fabs(e.foot_balance_target_deg-4.5f)<1e-6f);
- assert(std::fabs(e.target_energy_j-.02025f)<1e-6f);
+ assert(std::fabs(e.foot_balance_target_deg-8)<1e-6f);
+ assert(std::fabs(e.target_energy_j-.064f)<1e-6f);
  std::cout<<"actual runner side target and energy wiring PASS\n";
 }
 '''
