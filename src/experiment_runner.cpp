@@ -3526,18 +3526,37 @@ bool ExperimentRunner::tryWeakSideAssist(
   in.speed_fresh=peak_error_adaptation::speedUsable(event.pre_input_wheel_speed_rpm,
       event.pre_input_wheel_speed_valid,event.pre_input_wheel_speed_age_us);
   in.selector_valid=normal.valid;in.selector_width_ms=normal.width_ms;
-  in.hardware_max_width_ms=Config::ENERGY_CONTROL_AUTONOMOUS_MAX_PULSE_MS<70
-      ? Config::ENERGY_CONTROL_AUTONOMOUS_MAX_PULSE_MS : 70;
+  // Infer available time from the most recently completed negative half-cycle.
+  // Decisions are timestamped at actual scheduling; peaks carry measurement
+  // timestamps. Never treat a missing, stale or implausible pair as evidence
+  // that a long pulse fits. Ordinary coast/selector continues in that case.
+  uint32_t preceding_negative_ms=0;
+  for(const auto& d:phase_negative_decisions_) {
+    if(d.ms && d.ms<in.last_negative_peak_ms && d.ms>preceding_negative_ms)
+      preceding_negative_ms=d.ms;
+  }
+  if(!preceding_negative_ms || !in.last_negative_peak_ms ||
+     t_test_ms-in.last_negative_peak_ms>1500) {weak_side_assist_.interrupt();return false;}
+  const uint32_t measured_to_peak_ms=in.last_negative_peak_ms-preceding_negative_ms;
+  if(measured_to_peak_ms<=30 || measured_to_peak_ms>600) {
+    weak_side_assist_.interrupt();return false;
+  }
+  const uint32_t dynamic_cap_ms=measured_to_peak_ms-30;
+  in.hardware_max_width_ms=static_cast<uint16_t>(
+      dynamic_cap_ms<Config::WALKING_TARGET8_MAX_PULSE_MS ? dynamic_cap_ms : Config::WALKING_TARGET8_MAX_PULSE_MS);
   const auto assist=weak_side_assist_.propose(in);
   if(!assist.selected)return false;
 
   // Charge is an actuator-model estimate, not a measured current integral.
   // Match the ordinary negative excitatory command's motion-aligned signs.
-  const float initial_ma=static_cast<float>(event.physical_next_peak_side)*event.i0_estimated_mA;
-  const float goal_ma=predictCurrentGoalMa(assist.current_ma,fast_v);
-  const float q=lateral_energy::charge(lateral_current_table_,assist.width_ms,initial_ma,goal_ma);
-  if(!std::isfinite(q) || q<0.f || q>25.f || assist.width_ms==0 ||
-      assist.width_ms>Config::ENERGY_CONTROL_AUTONOMOUS_MAX_PULSE_MS) { weak_side_assist_.interrupt(); return false; }
+  const bool modeled_width=assist.width_ms<=Config::ENERGY_CONTROL_AUTONOMOUS_MAX_PULSE_MS;
+  const float initial_ma=modeled_width ? static_cast<float>(event.physical_next_peak_side)*event.i0_estimated_mA : NAN;
+  const float goal_ma=modeled_width ? predictCurrentGoalMa(assist.current_ma,fast_v) : NAN;
+  const float q=modeled_width ? lateral_energy::charge(lateral_current_table_,assist.width_ms,initial_ma,goal_ma) : NAN;
+  if((modeled_width && (!std::isfinite(q) || q<0.f || q>25.f)) || assist.width_ms==0 ||
+      assist.width_ms>in.hardware_max_width_ms || assist.width_ms>Config::WALKING_TARGET8_MAX_PULSE_MS) {
+    weak_side_assist_.interrupt(); return false;
+  }
 
   // Branch 13 stores planned width separately from actual pulse_width_ms;
   // a failed send retains this proposal but records actual width/current 0.
@@ -3554,7 +3573,7 @@ bool ExperimentRunner::tryWeakSideAssist(
   event.q_command_direction=event.physical_next_peak_side*assist.motion_sign;
   event.command_matches_zero_cross_motion=true;
   event.q_command_mA_s=q;event.q_effective_pred_mA_s=q;
-  event.predicted_current_goal_mA=goal_ma;event.predicted_current_rise_tau_s=lateral_current_table_.tau;
+  event.predicted_current_goal_mA=goal_ma;event.predicted_current_rise_tau_s=modeled_width ? lateral_current_table_.tau : NAN;
   event.aligned_initial_current_mA=initial_ma;
   event.command_current_mA=assist.current_ma;event.pulse_width_ms=assist.width_ms;
   event.pulse_start_ms=t_test_ms;event.pulse_end_ms=t_test_ms+assist.width_ms;
@@ -3587,7 +3606,7 @@ bool ExperimentRunner::tryWeakSideAssist(
   energy_control_autonomous_pending_wheel_age_us_=event.pre_input_wheel_speed_age_us;
   energy_control_autonomous_pending_wheel_valid_=event.pre_input_wheel_speed_valid;
   energy_control_autonomous_pending_zero_ms_=event.zero_cross_time_ms;
-  energy_control_autonomous_pending_mode_=peak_error_adaptation::modeForSignedCharge(q);
+  energy_control_autonomous_pending_mode_=peak_error_adaptation::Excite;
   energy_control_autonomous_pending_saturated_upper_=false;
   energy_control_autonomous_pending_saturated_lower_=false;
   work_positive_pending_=false;work_negative_pending_=false;

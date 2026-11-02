@@ -36,58 +36,69 @@ int main() {
   x.last_negative_peak_ms=x.now_ms-1500;assert(choose(x).selected);
   x.last_positive_peak_deg=16.f;assert(!choose(x).selected);
   x.last_positive_peak_deg=5.f;x.last_negative_peak_deg=NAN;assert(!choose(x).selected);
-  // Feedback advances only from actual accepted commands and a fresh,
-  // time-matched subsequent negative peak. Static low peaks now trigger a
-  // 5ms trial after three comparable cycles at the requested 8-degree target.
+  // Feedback advances only from confirmed commands and a fresh, time-matched
+  // subsequent negative peak. These are synthetic observations, not proof
+  // of physical peak or foot response.
   weak_side_assist::Controller ctrl;
   Input y;y.target_preset_deg=8;y.active_target_deg=8;y.physical_next_side=-1;
-  y.last_negative_peak_deg=5.2f;y.last_negative_peak_ms=900;y.now_ms=1000;
+  y.last_negative_peak_deg=4.5f;y.last_negative_peak_ms=900;y.now_ms=1000;
   y.negative_peak_count=2;y.crossing_rate_dps=30;y.wheel_rpm=300;y.battery_mv=8000;
   y.last_positive_peak_deg=5.3f;y.hardware_healthy=true;y.speed_fresh=true;
-  y.selector_valid=false;y.selector_width_ms=0;y.hardware_max_width_ms=70;
-  auto c=ctrl.propose(y);assert(c.selected && c.width_ms==30);
+  y.selector_valid=false;y.selector_width_ms=0;y.hardware_max_width_ms=150;
+  // At full target, a 2-degree deficit has a 43ms proportional width but must
+  // seed the 50ms experiment so that observations can eventually advance it.
+  y.last_negative_peak_deg=6.f;
+  auto seed=ctrl.propose(y);assert(seed.selected && seed.width_ms==50);
+  y.hardware_max_width_ms=42;seed=ctrl.propose(y);assert(seed.selected && seed.width_ms==42);
+  y.hardware_max_width_ms=150;y.last_negative_peak_deg=4.5f;
+  auto c=ctrl.propose(y);assert(c.selected && c.width_ms==50);
   // No confirmed command means no trial, even after repeated observations.
   for(int i=0;i<4;i++) {y.now_ms+=800;y.last_negative_peak_ms=y.now_ms-100;ctrl.propose(y);}
-  assert(ctrl.limitMs()==30);
+  assert(ctrl.limitMs()==50);
   // An active ramp target below 8 degrees never triggers exploration.
   y.active_target_deg=7.5f;
   for(int i=0;i<4;i++) {c=ctrl.propose(y);ctrl.confirm(y,c.width_ms);
     y.now_ms+=800;y.last_negative_peak_ms=y.now_ms-100;ctrl.propose(y);}
-  assert(ctrl.limitMs()==30);y.active_target_deg=8;
-  for(int i=0;i<3;i++) {c=ctrl.propose(y);assert(c.width_ms==30);ctrl.confirm(y,c.width_ms);
+  assert(ctrl.limitMs()==50);y.active_target_deg=8;
+  for(int i=0;i<2;i++) {c=ctrl.propose(y);assert(c.width_ms==50);ctrl.confirm(y,c.width_ms);
     y.now_ms+=800;y.last_negative_peak_ms=y.now_ms-100;c=ctrl.propose(y);}
-  assert(ctrl.limitMs()==35 && c.width_ms==35);
+  assert(ctrl.limitMs()==60 && c.width_ms==60);
   // A trial that is followed by two comparable weak peaks rolls back.
   for(int i=0;i<2;i++) {c=ctrl.propose(y);ctrl.confirm(y,c.width_ms);
-    y.now_ms+=800;y.last_negative_peak_ms=y.now_ms-100;y.last_negative_peak_deg=4.7f;ctrl.propose(y);}
-  assert(ctrl.limitMs()==30);
+    y.now_ms+=800;y.last_negative_peak_ms=y.now_ms-100;y.last_negative_peak_deg=4.0f;ctrl.propose(y);}
+  assert(ctrl.limitMs()==50);
   // Repeated weakness no longer raises the width during the four-cycle pause.
   for(int i=0;i<3;i++) {c=ctrl.propose(y);ctrl.confirm(y,c.width_ms);
     y.now_ms+=800;y.last_negative_peak_ms=y.now_ms-100;ctrl.propose(y);}
-  assert(ctrl.limitMs()==30);
-  ctrl.reset();y.last_negative_peak_deg=5.2f;
+  assert(ctrl.limitMs()==50);
+  ctrl.reset();y.last_negative_peak_deg=4.5f;
   // Continue the plateau experiment up to (never above) the hardware cap.
-  y.hardware_max_width_ms=45;
-  for(int i=0;i<16;i++) {c=ctrl.propose(y);assert(c.width_ms<=45);ctrl.confirm(y,c.width_ms);
+  y.hardware_max_width_ms=75;
+  for(int i=0;i<16;i++) {c=ctrl.propose(y);assert(c.width_ms<=75);ctrl.confirm(y,c.width_ms);
     y.now_ms+=800;y.last_negative_peak_ms=y.now_ms-100;ctrl.propose(y);}
-  assert(ctrl.limitMs()==45);
-  ctrl.reset();y.hardware_max_width_ms=70;
-  for(int i=0;i<32;i++) {c=ctrl.propose(y);assert(c.width_ms<=70);ctrl.confirm(y,c.width_ms);
+  assert(ctrl.limitMs()==75);
+  ctrl.reset();y.hardware_max_width_ms=150;
+  for(int i=0;i<40;i++) {c=ctrl.propose(y);assert(c.width_ms<=150);ctrl.confirm(y,c.width_ms);
     y.now_ms+=800;y.last_negative_peak_ms=y.now_ms-100;ctrl.propose(y);}
-  assert(ctrl.limitMs()==70);
-  ctrl.reset();y.hardware_max_width_ms=70;
-  for(int i=0;i<3;i++) {c=ctrl.propose(y);ctrl.confirm(y,c.width_ms);
+  assert(ctrl.limitMs()==150);
+  ctrl.reset();y.hardware_max_width_ms=150;
+  for(int i=0;i<2;i++) {c=ctrl.propose(y);ctrl.confirm(y,c.width_ms);
     y.now_ms+=800;y.last_negative_peak_ms=y.now_ms-100;ctrl.propose(y);}
-  assert(ctrl.limitMs()==35);
-  c=ctrl.propose(y);ctrl.confirm(y,c.width_ms);ctrl.interrupt();assert(ctrl.limitMs()==30);
+  assert(ctrl.limitMs()==60);
+  c=ctrl.propose(y);ctrl.confirm(y,c.width_ms);ctrl.interrupt();assert(ctrl.limitMs()==50);
+  // After interruption, forced exploration must not survive the abandoned
+  // trial; ordinary deficit-based output is used even with a high old cap.
+  y.last_negative_peak_deg=7.25f;
+  c=ctrl.propose(y);assert(c.selected && c.width_ms==24);
+  y.last_negative_peak_deg=4.5f;
   // An old or missing peak, a changing target, an unhealthy sensor, or a
   // normal powered selector never become evidence and never latch a stop.
   c=ctrl.propose(y);ctrl.confirm(y,c.width_ms);y.now_ms+=800;
-  ctrl.propose(y);assert(ctrl.limitMs()==30);
+  ctrl.propose(y);assert(ctrl.limitMs()==50);
   y.last_negative_peak_ms=y.now_ms-100;
   c=ctrl.propose(y);ctrl.confirm(y,c.width_ms);y.now_ms+=800;
   y.last_negative_peak_ms=y.now_ms-100;y.active_target_deg=7.5;
-  ctrl.propose(y);assert(ctrl.limitMs()==30);
+  ctrl.propose(y);assert(ctrl.limitMs()==50);
   y.active_target_deg=8;y.hardware_healthy=false;assert(!ctrl.propose(y).selected);
   y.hardware_healthy=true;y.selector_valid=true;y.selector_width_ms=40;
   assert(!ctrl.propose(y).selected);ctrl.interrupt();
@@ -95,6 +106,11 @@ int main() {
   // A mismatched send width is rejected instead of counted as an experiment.
   ctrl.reset();c=ctrl.propose(y);ctrl.confirm(y,c.width_ms+1);
   y.now_ms+=800;y.last_negative_peak_ms=y.now_ms-100;ctrl.propose(y);
-  assert(ctrl.limitMs()==30);
+  assert(ctrl.limitMs()==50);
+  // The 50ms seed cannot override an existing downward backoff.
+  ctrl.reset();y.last_negative_peak_deg=6.f;
+  for(int i=0;i<2;i++) {c=ctrl.propose(y);assert(c.width_ms==50);ctrl.confirm(y,c.width_ms);
+    y.now_ms+=800;y.last_negative_peak_ms=y.now_ms-100;y.last_negative_peak_deg-=.2f;ctrl.propose(y);}
+  assert(ctrl.limitMs()==40);c=ctrl.propose(y);assert(c.selected && c.width_ms==40);
   std::cout << "weak side assist: plateau exploration, rollback and guards PASS\n";
 }

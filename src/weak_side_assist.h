@@ -33,7 +33,7 @@ struct Choice {
   int8_t motion_sign=0;             // +1 relative to the zero-cross motion
   float deficit_deg=NAN;            // observation, NOT predicted response
 };
-// Keep current tested 300mA and existing negative hard limit. A pair of prior
+// Keep the current at 300 mA. A pair of prior
 // confirmed negative peaks prevents an initial seed/half step from masquerading
 // as a developed weak side. No model-support cutoffs in rate, voltage, or rpm.
 inline Choice choose(const Input& in) {
@@ -55,9 +55,9 @@ inline Choice choose(const Input& in) {
   const float deficit=in.active_target_deg-in.last_negative_peak_deg;
   if(!(deficit>.5f))return out;
   // Explicitly experimental proportional fallback: 20ms at 0.5 degrees of
-  // deficit; 15ms/degree, capped by 70ms and the caller's hardware limit.
+  // deficit; 15ms/degree, capped by 150ms and the caller's timing limit.
   const float raw=20.f+15.f*(deficit-.5f);
-  const float limit=std::fmin(70.f,static_cast<float>(in.hardware_max_width_ms));
+  const float limit=std::fmin(150.f,static_cast<float>(in.hardware_max_width_ms));
   const float bounded=std::fmin(limit,std::fmax(20.f,raw));
   out.width_ms=static_cast<uint16_t>(std::floor(bounded+.5f));
   out.selected=true;out.current_ma=300;out.motion_sign=1;out.deficit_deg=deficit;
@@ -67,8 +67,8 @@ inline Choice choose(const Input& in) {
 // Experimental bounded response tracker. A change in the next negative peak
 // is an observation, not an identified effect of this pulse: body motion,
 // opposite-side inputs, contact and other state changes can all contribute.
-// The tracker deliberately starts below the prior 70ms fixed limit. It can
-// explore upward after repeated favorable observations and backs off after
+// The tracker starts at 50ms and can explore upward after comparable
+// observations, up to the caller's timing and hardware limits. It backs off after
 // repeated unfavorable observations. Missing/stale/confounded observations
 // discard evidence, never latch a stop or mark an unsuccessful send as data.
 class Controller {
@@ -77,6 +77,7 @@ class Controller {
   void interrupt() {
     pending_=false;stable_count_=0;down_count_=0;
     if(trial_) {limit_ms_=rollback_ms_;trial_=false;}
+    exploring_=false;trial_samples_=0;bad_count_=0;
   }
   uint16_t limitMs() const { return limit_ms_; }
 
@@ -84,6 +85,15 @@ class Controller {
     observe(in);
     Choice out=choose(in);
     if(out.selected) {
+      // Once the full preset is active and the measured side remains at
+      // least a degree short, actually try the initial limit instead of
+      // allowing the proportional seed to block all at-limit observations.
+      // A prior rollback or the caller's timing cap always wins.
+      if(!exploring_ && in.active_target_deg>=7.95f && out.deficit_deg>=1.f) {
+        uint16_t seed=limit_ms_<50 ? limit_ms_ : 50;
+        if(seed>in.hardware_max_width_ms)seed=in.hardware_max_width_ms;
+        if(out.width_ms<seed)out.width_ms=seed;
+      }
       // At the final target, a confirmed experiment can exceed the initial
       // deficit formula while staying within the physical hardware cap.
       if(exploring_ && in.active_target_deg>=7.95f)
@@ -133,7 +143,7 @@ class Controller {
         limit_ms_=rollback_ms_;trial_=false;stable_count_=0;
         cooldown_=4;return;
       }
-      if(trial_samples_>=3 && bad_count_==0)trial_=false;
+      if(trial_samples_>=2 && bad_count_==0)trial_=false;
     }
     // Preserve the existing pre-trial trend guard: two successive sizeable
     // drops reduce the permitted width. This is an observation heuristic,
@@ -156,11 +166,11 @@ class Controller {
     if(!stable_count_ || std::fabs(in.last_negative_peak_deg-stable_base_)>.35f) {
       stable_base_=in.last_negative_peak_deg;stable_sum_=in.last_negative_peak_deg;stable_count_=1;
     } else {stable_sum_+=in.last_negative_peak_deg;++stable_count_;}
-    if(stable_count_>=3 && !trial_ && limit_ms_<70 &&
+    if(stable_count_>=2 && !trial_ && limit_ms_<150 &&
        in.hardware_max_width_ms>limit_ms_) {
       rollback_ms_=limit_ms_;trial_reference_=stable_sum_/stable_count_;
-      limit_ms_=static_cast<uint16_t>(limit_ms_+5);
-      if(limit_ms_>70)limit_ms_=70;
+      limit_ms_=static_cast<uint16_t>(limit_ms_+10);
+      if(limit_ms_>150)limit_ms_=150;
       if(limit_ms_>in.hardware_max_width_ms)limit_ms_=in.hardware_max_width_ms;
       trial_=true;exploring_=true;trial_samples_=bad_count_=stable_count_=0;
     }
@@ -168,7 +178,7 @@ class Controller {
   float before_=0.f,target_=0.f,opposite_=0.f,rpm_=0.f;
   float stable_base_=0.f,stable_sum_=0.f,trial_reference_=0.f;
   uint32_t command_ms_=0,prior_peak_ms_=0,proposed_at_=0;
-  uint16_t limit_ms_=30,rollback_ms_=30,proposed_ms_=0;
+  uint16_t limit_ms_=50,rollback_ms_=50,proposed_ms_=0;
   uint8_t stable_count_=0,trial_samples_=0,bad_count_=0,cooldown_=0,down_count_=0;
   bool pending_=false,applied_limit_=false,trial_=false,exploring_=false;
 };
