@@ -15,6 +15,21 @@ static uint16_t tick(Controller& x,unsigned t,float l,float r,float peak=5.f,
   x.cycle(c);return w;
 }
 int main(){
+  // A peak concentrated in one camera frame can be a real fast swing, as in
+  // run132; it must not be treated as a confirmed small-foot observation.
+  assert(!spanReliable(4.02f,.11f));assert(!spanReliable(3.10f,.69f));
+  assert(spanReliable(3.70f,3.35f));assert(spanReliable(.4f,.1f));
+  assert(!spanReliable(NAN,1.f));
+  // Consecutive complete cycles with alternating side differences do not
+  // justify an offset. A persistent side difference does.
+  Controller signs;signs.preferHighCurrentFirst();
+  tick(signs,100,3,1,5,30,60,80,true,1.f,1200);
+  tick(signs,200,1,3,5,30,60,80,true,1.f,1200);
+  tick(signs,300,3,1,5,30,60,80,true,1.f,1200);
+  assert(signs.offset()==0);
+  tick(signs,400,3,1,5,30,60,80,true,1.f,1200);
+  tick(signs,500,3,1,5,30,60,80,true,1.f,1200);
+  assert(signs.offset()==10);
   // The unmodeled 1200 mA walking branch can use the same actual-command
   // confirmation and two completed-cycle feedback as the 400 mA branch.
   // Changing a selected width never claims a measured physical improvement.
@@ -52,6 +67,39 @@ int main(){
     c.positive_width=width;c.positive_ma=1200;c.positive_sign=1;
     c.complete=c.negative_known=c.positive_executed=true;
     x.cycle(c);assert(x.offset()==0 && !x.fault());
+  }
+  // Positive-side pre-pulse speed and body rate must also be comparable;
+  // they affect motor work even with the same current and pulse duration.
+  for(int changed=0;changed<2;++changed) {
+    Controller x;x.preferHighCurrentFirst();tick(x,100,3,1,5,30,60,80,true,1.f,1200);
+    tick(x,200,3,1,5,30,60,80,true,1.f,1200);
+    tick(x,300,2.5f,1.1f,5,30,60,80,true,1.f,1200);
+    const auto w=x.limit(450,30,1200,1,60,true,1.f);x.confirm(450,true,1200,1,w);
+    Cycle c;c.start_ms=400;c.end_ms=500;c.positive_ms=450;
+    c.left=2.5f;c.right=1.1f;c.negative_peak=5;c.target_mj=1;
+    c.negative_key=0x80000000u | (300u<<16) | 0x8000u | 80u;
+    c.positive_rate_dps=changed==0 ? 16.f : 0.f;
+    c.positive_rpm=changed==1 ? 151.f : 0.f;
+    c.positive_width=w;c.positive_ma=1200;c.positive_sign=1;
+    c.complete=c.negative_known=c.positive_executed=true;
+    x.cycle(c);assert(x.offset()==0 && !x.fault());
+    // Recovery reacquires two fresh cycles; stale reference and evidence
+    // cannot immediately propose again after an incomparable observation.
+    assert(tick(x,500,3,1,5,30,60,80,true,1.f,1200)==30);
+    assert(x.offset()==0);
+    tick(x,600,3,1,5,30,60,80,true,1.f,1200);
+    assert(x.offset()==10 && !x.fault());
+  }
+  // A different state on the very first changed command must prevent the
+  // candidate from being sent, even if subsequent cycles might match again.
+  for(int changed=0;changed<2;++changed) {
+    Controller x;x.preferHighCurrentFirst();tick(x,100,3,1,5,30,60,80,true,1.f,1200);
+    tick(x,200,3,1,5,30,60,80,true,1.f,1200);
+    assert(x.offset()==10);
+    const auto w=x.limit(350,30,1200,1,60,true,1.f,
+        changed==0 ? 16.f : 0.f,changed==1 ? -151.f : 0.f);
+    assert(w==30 && x.offset()==0 && !x.fault());
+    x.confirm(350,true,1200,1,w);
   }
   // A good normalized-ratio response with both weaker foot and body peak
   // retained permits another step. The observed timing includes one cycle

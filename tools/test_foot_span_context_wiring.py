@@ -4,7 +4,7 @@ root=Path(__file__).resolve().parents[1]
 s=(root/'src/experiment_runner.cpp').read_text(encoding='utf8')
 cycle=s.split('void ExperimentRunner::processFootSpanCycle()',1)[1].split('\nvoid ExperimentRunner::recordFootPhasePeak(',1)[0]
 assert 'cycle.left=span.left.trimmed_span;cycle.right=span.right.trimmed_span' in cycle
-for x in ('negative->trigger_deg','negative->rate_dps','negative->rpm','context_ok'):
+for x in ('negative->trigger_deg','negative->rate_dps','negative->rpm','positive->rate_dps','positive->rpm','spanReliable(span.left.span,span.left.trimmed_span)','spanReliable(span.right.span,span.right.trimmed_span)','context_ok'):
     assert x in cycle
 decision=s.split('void ExperimentRunner::finishFootEnergyDecision(',1)[1].split('\nbool ExperimentRunner::update',1)[0]
 for x in ('d.trigger_deg=', 'd.rate_dps=event.zero_cross_abs_rate_dps',
@@ -17,5 +17,5 @@ assert 'foot_span_control_.limit(' in runner and 'choice.width_ms<=100' in runne
 assert 'tilt_priority_.target()>=6.f' in runner and 'preferHighCurrentFirst()' in runner
 assert 'tilt_priority_.timingCap(' in runner and 'Span_selected' in runner
 metadata=(root/'src/psram_logger.cpp').read_text(encoding='utf8')
-assert 'confirmed_1200ma_positive_width_trial_v1' in metadata
+assert 'confirmed_1200ma_positive_width_trial_v2' in metadata
 print('1200mA camera feedback, comparable context and log wiring PASS')

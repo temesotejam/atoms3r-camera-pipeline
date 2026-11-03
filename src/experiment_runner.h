@@ -175,7 +175,7 @@ private:
   };
   struct SpanPositiveDecision {
     uint32_t ms=0; uint16_t width=0; int16_t ma=0; int8_t sign=0;
-    float target_mj=NAN; bool executed=false;
+    float target_mj=NAN,rate_dps=NAN,rpm=NAN; bool executed=false;
   };
   PhaseNegativePeak phase_negative_peaks_[8];
   PhaseNegativeDecision phase_negative_decisions_[8];

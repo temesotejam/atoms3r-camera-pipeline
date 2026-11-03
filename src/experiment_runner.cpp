@@ -2903,6 +2903,11 @@ void ExperimentRunner::processFootSpanCycle() {
       !span.left.edge_unverified && !span.right.edge_unverified;
   tilt_priority_.footCycle(span.start_ms,span.end_ms,
       span.left.trimmed_span,span.right.trimmed_span,timing_quality);
+  // Preserve the established timing experiment. This stricter ambiguity
+  // check gates only the foot-span width feedback, not the timing policy.
+  const bool feedback_quality=timing_quality &&
+      foot_span_control::spanReliable(span.left.span,span.left.trimmed_span) &&
+      foot_span_control::spanReliable(span.right.span,span.right.trimmed_span);
   const PhaseNegativePeak* peak=nullptr;
   const PhaseNegativeDecision* negative=nullptr;
   const SpanPositiveDecision* positive=nullptr;
@@ -2935,13 +2940,14 @@ void ExperimentRunner::processFootSpanCycle() {
     cycle.positive_ms=positive->ms;cycle.positive_width=positive->width;
     cycle.positive_ma=positive->ma;cycle.positive_sign=positive->sign;
     cycle.positive_executed=positive->executed;cycle.target_mj=positive->target_mj;
+    cycle.positive_rate_dps=positive->rate_dps;cycle.positive_rpm=positive->rpm;
   }
   // A small, consistently detected foot is still a measurement, not an
   // absent foot. Require a reversal for larger motion so a monotonic drift
   // alone cannot masquerade as a complete full-cycle stroke.
   const bool left_shape=span.left.both_directions || span.left.low_signal;
   const bool right_shape=span.right.both_directions || span.right.low_signal;
-  cycle.complete=span.valid && span.continuous && left_shape && right_shape &&
+  cycle.complete=feedback_quality && span.continuous && left_shape && right_shape &&
       !span.left.single_outlier && !span.right.single_outlier &&
       !span.left.edge_unverified && !span.right.edge_unverified &&
       positives==1 && negatives==1 && peak;
@@ -3542,7 +3548,8 @@ bool ExperimentRunner::tryTiltPriority(
     if(cap>100)cap=100;
     event.foot_span_baseline_ms=baseline;
     event.foot_span_requested_ms=foot_span_control_.limit(t_test_ms,baseline,
-        choice.current_ma,choice.direction,cap,true,event.target_energy_j*1000.f);
+        choice.current_ma,choice.direction,cap,true,event.target_energy_j*1000.f,
+        event.zero_cross_abs_rate_dps,event.pre_input_wheel_speed_rpm);
     choice.width_ms=event.foot_span_requested_ms;
     foot_adjusted=choice.width_ms!=baseline;
   } else if(!choice.coast && in.next_side>0) {
@@ -3744,7 +3751,8 @@ bool ExperimentRunner::selectFootPhaseOutput(
       // A real stale/missing sensor or hardware fault is not model coverage.
       // Suppress this crossing explicitly, irrespective of selector fallback.
       (void)foot_span_control_.limit(t_test_ms,event.foot_span_baseline_ms,
-          work_choice.current_ma,work_choice.command_sign,work_choice.allowed_cap_ms,false,event.target_energy_j*1000.f);
+          work_choice.current_ma,work_choice.command_sign,work_choice.allowed_cap_ms,false,event.target_energy_j*1000.f,
+          event.zero_cross_abs_rate_dps,event.pre_input_wheel_speed_rpm);
       event.reason=status_.emergency_stop || status_.state!=ExperimentState::RUNNING_BATCH_SWEEP
           ? Config::ENERGY_CONTROL_AUTONOMOUS_REASON_ESTOP_OR_STATE
           : (!roller_ || !roller_->ok() ? Config::ENERGY_CONTROL_AUTONOMOUS_REASON_ROLLER_NOT_READY
@@ -3764,7 +3772,8 @@ bool ExperimentRunner::selectFootPhaseOutput(
     // recorded walk that condition held throughout, so correction never ran.
     // If a cycle is missing or stale, the controller returns the baseline.
     const uint16_t limited=foot_span_control_.limit(t_test_ms,event.foot_span_baseline_ms,
-        work_choice.current_ma,work_choice.command_sign,work_choice.allowed_cap_ms,true,event.target_energy_j*1000.f);
+        work_choice.current_ma,work_choice.command_sign,work_choice.allowed_cap_ms,true,event.target_energy_j*1000.f,
+        event.zero_cross_abs_rate_dps,event.pre_input_wheel_speed_rpm);
     event.foot_span_requested_ms=limited;
     if(foot_span_control_.requireNeutral()) {
       requestEmergencyStop("foot_span_command_unresolved");phase_skip_output=true;
@@ -3948,6 +3957,9 @@ void ExperimentRunner::finishFootEnergyDecision(PsramLogger::EnergyControlAutono
       auto& d=span_positive_decisions_[span_positive_decision_next_];
       d.ms=t_ms;d.width=event.pulse_width_ms;d.ma=event.command_current_mA;
       d.sign=event.q_command_direction;d.target_mj=event.target_energy_j*1000.f;
+      d.rate_dps=event.zero_cross_abs_rate_dps;
+      d.rpm=event.pre_input_wheel_speed_valid && event.pre_input_wheel_speed_age_us<=50000
+          ? event.pre_input_wheel_speed_rpm : NAN;
       d.executed=event.output_executed;
       span_positive_decision_next_=(span_positive_decision_next_+1)%8;
       if(event.work_control_branch==15 && (event.pulse_width_ms>100 || tilt_priority_.target()<6.f)) {
@@ -3970,7 +3982,9 @@ void ExperimentRunner::finishFootEnergyDecision(PsramLogger::EnergyControlAutono
     event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_left_outlier, span.left.single_outlier);event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_right_outlier, span.right.single_outlier);
     event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_left_edge_unverified, span.left.edge_unverified);event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_right_edge_unverified, span.right.edge_unverified);
     event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_left_both, span.left.both_directions);event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_right_both, span.right.both_directions);
-    event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_valid, span.valid && span.continuous && !span.left.single_outlier && !span.right.single_outlier &&
+    event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_valid, span.valid && span.continuous &&
+        foot_span_control::spanReliable(span.left.span,span.left.trimmed_span) &&
+        foot_span_control::spanReliable(span.right.span,span.right.trimmed_span) && !span.left.single_outlier && !span.right.single_outlier &&
         !span.left.edge_unverified && !span.right.edge_unverified &&
         (span.left.both_directions || span.left.low_signal) && (span.right.both_directions || span.right.low_signal));
     const bool supported=event.valid && event.output_executed && event.work_control_branch!=0 &&

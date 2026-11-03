@@ -94,7 +94,7 @@ enum class ExperimentState {RUNNING_BATCH_SWEEP,OTHER};
 namespace PsramLogger {struct EnergyControlAutonomousZeroCrossEvent {
  enum {Span_selected=2};uint16_t foot_span_baseline_ms=0,foot_span_requested_ms=0;
  float target_peak_deg=8,foot_balance_target_deg=10,target_energy_j=.001f;
- float pre_input_wheel_speed_rpm=200;bool pre_input_wheel_speed_valid=true;
+ float pre_input_wheel_speed_rpm=0,zero_cross_abs_rate_dps=0;bool pre_input_wheel_speed_valid=true;
  uint32_t pre_input_wheel_speed_age_us=1000;uint16_t vbat_mV=7800;
  int8_t physical_next_peak_side=1;bool side_mismatch_diagnostic=false,span_selected=false;int reason=0;
  void setFootSpanFlag(int flag,bool value){if(flag==Span_selected)span_selected=value;}

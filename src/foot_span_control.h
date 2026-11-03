@@ -6,12 +6,20 @@
 // values are not ground step lengths, and the initial control polarity is an
 // empirically motivated hypothesis, not a guaranteed actuator response.
 namespace foot_span_control {
+// A single sampled extremum may be a fast real swing or a false detection.
+// Neither the raw nor trimmed span alone can decide which; withhold feedback
+// when discarding that extremum changes the result substantially.
+inline bool spanReliable(float raw,float trimmed) {
+  return std::isfinite(raw) && std::isfinite(trimmed) && raw>=0.f && trimmed>=0.f &&
+      !(raw-trimmed>1.5f && trimmed<raw*.5f);
+}
 struct Cycle {
   uint32_t start_ms=0, end_ms=0, positive_ms=0;
   float left=NAN, right=NAN, negative_peak=NAN, target_mj=NAN;
   // Context of the negative input: comparisons must not silently treat
   // different early-trigger angles or incoming mechanical states as equal.
   float negative_trigger_deg=0.f,negative_rate_dps=0.f,negative_rpm=0.f;
+  float positive_rate_dps=0.f,positive_rpm=0.f;
   uint32_t negative_key=0;
   uint16_t positive_width=0;
   int16_t positive_ma=0;
@@ -60,7 +68,8 @@ class Controller {
        !std::isfinite(c.negative_peak) || c.negative_peak<=0 ||
        !std::isfinite(c.target_mj) || c.target_mj<=0 ||
        !std::isfinite(c.negative_trigger_deg) || !std::isfinite(c.negative_rate_dps) ||
-       !std::isfinite(c.negative_rpm)) {
+       !std::isfinite(c.negative_rpm) || !std::isfinite(c.positive_rate_dps) ||
+       !std::isfinite(c.positive_rpm)) {
       invalidateObservation();return;
     }
     const Actual* action=nullptr;unsigned actions=0;
@@ -85,11 +94,19 @@ class Controller {
     // the camera width is not an absolute ground stride.
     if(c.left+c.right<.3f) {invalidateObservation();return;}
     const float e=(c.left-c.right)/(c.left+c.right+.1f);
+    // A sign reversal between adjacent complete cycles is not evidence for a
+    // sustained side imbalance. Reacquire two consecutive same-sign cycles
+    // before proposing a new offset; rollback remains independent of this.
+    const int sign=e>.10f ? 1 : e<-.10f ? -1 : 0;
+    if(sign && sign==imbalance_sign_ && continuous) {
+      if(imbalance_count_<2)++imbalance_count_;
+    } else {imbalance_sign_=sign;imbalance_count_=sign ? 1 : 0;}
     observed_left_=c.left;observed_right_=c.right;observed_peak_=c.negative_peak;
     observed_error_=e;observed_current_=c.positive_ma;observed_target_=c.target_mj;
     observed_negative_key_=c.negative_key;
     observed_negative_trigger_=c.negative_trigger_deg;
     observed_negative_rate_=c.negative_rate_dps;observed_negative_rpm_=c.negative_rpm;
+    observed_positive_rate_=c.positive_rate_dps;observed_positive_rpm_=c.positive_rpm;
     observed_baseline_=action->baseline;
     have_observation_=true;
     if(!have_reference_) {
@@ -113,7 +130,9 @@ class Controller {
          base_delta>5 || base_delta< -5 || !comparableNegative(c.negative_key,trial_negative_key_) ||
          std::fabs(c.negative_trigger_deg-trial_negative_trigger_)>.5f ||
          std::fabs(c.negative_rate_dps-trial_negative_rate_)>10.f ||
-         std::fabs(c.negative_rpm-trial_negative_rpm_)>100.f) {
+         std::fabs(c.negative_rpm-trial_negative_rpm_)>100.f ||
+         std::fabs(c.positive_rate_dps-trial_positive_rate_)>15.f ||
+         std::fabs(c.positive_rpm-trial_positive_rpm_)>150.f) {
         invalidateObservation();return;
       }
       const float weak=trial_right_?c.right:c.left;
@@ -143,7 +162,9 @@ class Controller {
     const float refweak=std::fmin(reference_left_,reference_right_);
     const bool weak_loss=weak<refweak*.8f && weak<refweak-.05f;
     const bool peak_loss=c.negative_peak<reference_peak_-.5f;
-    if(weak_loss || peak_loss)++weak_count_;else weak_count_=0;
+    // Baseline motion alone is not the result of an applied trial. Do not
+    // reverse the exploratory polarity when there is nothing to roll back.
+    if(offset_ms_!=0 && (weak_loss || peak_loss))++weak_count_;else weak_count_=0;
     if(weak_count_>=2) {
       weak_count_=0;polarity_=-polarity_;
       const int restored=towardZero(offset_ms_);
@@ -152,6 +173,7 @@ class Controller {
       return;
     }
     if(std::fabs(filtered_error_)<=.10f){state_=State::Hold;return;}
+    if(imbalance_count_<2 || (filtered_error_>0.f ? 1 : -1)!=imbalance_sign_)return;
     const int step=(filtered_error_>0.f ? 1 : -1)*polarity_*10;
     const int proposal=offset_ms_+step;
     const int bounded=proposal < -30 ? -30 : proposal > 30 ? 30 : proposal;
@@ -160,7 +182,8 @@ class Controller {
   }
 
   uint16_t limit(uint32_t now,uint16_t baseline,int16_t ma,int sign,
-                 uint16_t existing_cap,bool allowed,float target_mj) {
+                 uint16_t existing_cap,bool allowed,float target_mj,
+                 float positive_rate_dps=0.f,float positive_rpm=0.f) {
     const uint16_t cap=existing_cap<100?existing_cap:100;
     const uint16_t safe=baseline<cap?baseline:cap;
     baseline_ms_=baseline;request_ma_=ma;request_target_mj_=target_mj;
@@ -184,6 +207,18 @@ class Controller {
       invalidateObservation();
     }
     if(!last_usable_end_)return safe;
+    // Do not submit a proposed change if its own pre-input state already
+    // differs from the reference. Checking only later cycles would allow the
+    // intervention itself to occur at a quite different wheel/body speed.
+    if(pending_change_ && offset_ms_!=0) {
+      const int delta=static_cast<int>(observed_baseline_)-static_cast<int>(baseline);
+      if(!have_observation_ || !std::isfinite(positive_rate_dps) || !std::isfinite(positive_rpm) ||
+         observed_current_!=ma || std::fabs(observed_target_-target_mj)>.05f ||
+         delta>5 || delta< -5 || std::fabs(observed_positive_rate_-positive_rate_dps)>15.f ||
+         std::fabs(observed_positive_rpm_-positive_rpm)>150.f) {
+        invalidateObservation();return safe;
+      }
+    }
     // If a newly requested first step has no room in that direction, try the
     // other direction explicitly instead of repeatedly counting a blocked
     // proposal. This is an exploratory intervention, not proof that the
@@ -234,6 +269,7 @@ class Controller {
           trial_negative_key_=observed_negative_key_;
           trial_negative_trigger_=observed_negative_trigger_;
           trial_negative_rate_=observed_negative_rate_;trial_negative_rpm_=observed_negative_rpm_;
+          trial_positive_rate_=observed_positive_rate_;trial_positive_rpm_=observed_positive_rpm_;
           const int before_delta=static_cast<int>(observed_baseline_)-static_cast<int>(baseline_ms_);
           trial_reference_valid_=observed_current_==ma && std::fabs(observed_target_-request_target_mj_)<=.05f &&
               before_delta<=5 && before_delta>= -5;
@@ -249,7 +285,9 @@ class Controller {
   void invalidateObservation() {
     // Drop both an active trial and a proposal not yet sent. Keeping the
     // proposal after clearing the reference would issue an untracked pulse.
-    consecutive_=0;have_observation_=false;trial_active_=false;offset_ms_=0;
+    consecutive_=0;last_usable_end_=0;weak_count_=0;have_reference_=false;
+    imbalance_count_=0;imbalance_sign_=0;
+    have_observation_=false;trial_active_=false;offset_ms_=0;
     pending_change_=confirmed_offset_!=0;
     state_=pending_change_?State::Restore:State::Collect;
   }
@@ -276,11 +314,14 @@ class Controller {
   float observed_left_=0,observed_right_=0,observed_peak_=0,observed_error_=0,observed_target_=0;
   float observed_negative_trigger_=0,observed_negative_rate_=0,observed_negative_rpm_=0;
   float trial_negative_trigger_=0,trial_negative_rate_=0,trial_negative_rpm_=0;
+  float observed_positive_rate_=0,observed_positive_rpm_=0;
+  float trial_positive_rate_=0,trial_positive_rpm_=0;
   float trial_ratio_=0,trial_weak_=0,trial_peak_=0,trial_target_=0;
   float trial_ratio_sum_=0,trial_weak_sum_=0,trial_peak_sum_=0;
   int16_t observed_current_=0,trial_current_=0;uint16_t observed_baseline_=0,trial_baseline_=0;unsigned trial_count_=0;
   bool have_observation_=false,trial_active_=false,trial_right_=true,trial_reference_valid_=false;
   int offset_ms_=0,confirmed_offset_=0,polarity_=-1;
+  int imbalance_sign_=0;unsigned imbalance_count_=0;
   unsigned consecutive_=0,weak_count_=0,updates_=0;
   bool have_reference_=false,pending_=false,request_changed_=false,pending_change_=false,request_eligible_=false;
   bool high_current_initial_=false;
