@@ -31,6 +31,20 @@ class Controller {
   void reset() {*this=Controller{};}
   float target()const{return target_deg_;}
   uint16_t widthLimit(int side)const{return history_[index(side)].width_ms;}
+  // Absolute trial cap: retain the hardware limit and the previously
+  // observed time-to-peak guard. The caller may explore around the ordinary
+  // ramp/velocity-selected width only while staying under this cap.
+  __attribute__((noinline)) uint16_t timingCap(int side,uint32_t now,uint16_t hardware) const {
+    if((side!=1 && side!=-1)||!now)return 0;
+    uint16_t cap=hardware<150 ? hardware : 150;
+    const History& h=history_[index(side)];
+    const bool fresh=h.peak_ms && now>=h.peak_ms && now-h.peak_ms<=1500;
+    if(fresh && h.paired_ms==h.peak_ms && h.elapsed_ms) {
+      if(h.elapsed_ms<=30)return 0;
+      if(cap>h.elapsed_ms-30)cap=static_cast<uint16_t>(h.elapsed_ms-30);
+    }
+    return cap;
+  }
 
   // Completed camera-relative full-cycle spans are a comparative signal,
   // not ground displacement. Never infer polarity from one frame or a first

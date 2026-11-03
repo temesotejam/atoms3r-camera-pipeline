@@ -41,5 +41,13 @@ int main(){
   c.peak(-1,21000,1.f);c.peak(1,21300,9.f);
   assert(c.negativeEarlyThreshold(21400,1)==3.f); // 3 degree ceiling
   c.reset();assert(c.negativeEarlyThreshold(14403,1)==0.f);
+  Controller cap;cap.peak(-1,500,2.f);cap.crossing(1,1000);
+  tilt_priority::Choice drive;drive.selected=true;drive.direction=1;
+  drive.target_deg=4.5f;drive.current_ma=1200;drive.width_ms=10;
+  cap.confirm(1,1000,drive,true);cap.peak(1,1050,2.f);
+  assert(cap.timingCap(1,1100,150)==20); // observed 50ms to peak, minus 30ms
+  assert(cap.timingCap(1,1100,10)==10); // absolute hardware cap
+  assert(cap.timingCap(1,5000,150)==150); // stale timing never clamps a future trial
+  assert(cap.timingCap(0,1100,150)==0);
   std::puts("body asymmetry and camera-based early timing: PASS");
 }

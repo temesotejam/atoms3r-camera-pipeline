@@ -15,6 +15,44 @@ static uint16_t tick(Controller& x,unsigned t,float l,float r,float peak=5.f,
   x.cycle(c);return w;
 }
 int main(){
+  // The unmodeled 1200 mA walking branch can use the same actual-command
+  // confirmation and two completed-cycle feedback as the 400 mA branch.
+  // Changing a selected width never claims a measured physical improvement.
+  Controller high;high.preferHighCurrentFirst();
+  assert(tick(high,100,3,1,5,30,60,80,true,1.f,1200)==30);
+  assert(tick(high,200,3,1,5,30,60,80,true,1.f,1200)==30);
+  assert(high.offset()==10 && high.acceptedProbeCycles()==0);
+  assert(tick(high,300,2.5f,1.1f,5,30,60,80,true,1.f,1200)==40);
+  tick(high,400,2.5f,1.1f,5,30,60,80,true,1.f,1200);
+  tick(high,500,2.5f,1.1f,5,30,60,80,true,1.f,1200);
+  assert(high.offset()==20 && !high.fault());
+  Controller high_bad;high_bad.preferHighCurrentFirst();
+  tick(high_bad,100,3,1,5,30,60,80,true,1.f,1200);
+  tick(high_bad,200,3,1,5,30,60,80,true,1.f,1200);
+  tick(high_bad,300,1.5f,.5f,5,30,60,80,true,1.f,1200);
+  tick(high_bad,400,1.5f,.5f,5,30,60,80,true,1.f,1200);
+  tick(high_bad,500,1.5f,.5f,5,30,60,80,true,1.f,1200);
+  assert(high_bad.offset()==0 && !high_bad.fault());
+
+  // A change in negative-side trigger, crossing rate or wheel speed cannot
+  // be misreported as the effect of a changed positive-side pulse. Missing
+  // comparable evidence discards the experiment; it is not a stop request.
+  for(int changed=0;changed<3;++changed) {
+    Controller x;x.preferHighCurrentFirst();tick(x,100,3,1,5,30,60,80,true,1.f,1200);
+    tick(x,200,3,1,5,30,60,80,true,1.f,1200);
+    tick(x,300,2.5f,1.1f,5,30,60,80,true,1.f,1200);
+    const auto width=x.limit(450,30,1200,1,60,true,1.f);
+    x.confirm(450,true,1200,1,width);
+    Cycle c;c.start_ms=400;c.end_ms=500;c.positive_ms=450;
+    c.left=2.5f;c.right=1.1f;c.negative_peak=5;c.target_mj=1;
+    c.negative_key=0x80000000u | (300u<<16) | 0x8000u | 80u;
+    c.negative_trigger_deg=changed==0 ? 1.f : 0.f;
+    c.negative_rate_dps=changed==1 ? 11.f : 0.f;
+    c.negative_rpm=changed==2 ? 101.f : 0.f;
+    c.positive_width=width;c.positive_ma=1200;c.positive_sign=1;
+    c.complete=c.negative_known=c.positive_executed=true;
+    x.cycle(c);assert(x.offset()==0 && !x.fault());
+  }
   // A good normalized-ratio response with both weaker foot and body peak
   // retained permits another step. The observed timing includes one cycle
   // overlapping the command and two full later cycles.

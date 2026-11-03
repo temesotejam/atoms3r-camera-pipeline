@@ -169,7 +169,10 @@ private:
   tilt_priority::Controller tilt_priority_;
   positive_left_boost::Input positive_left_input_;
   struct PhaseNegativePeak { uint32_t ms=0; float amplitude=NAN; };
-  struct PhaseNegativeDecision { uint32_t ms=0; foot_phase_cap::NegativeDecision value; };
+  struct PhaseNegativeDecision {
+    uint32_t ms=0; foot_phase_cap::NegativeDecision value;
+    float trigger_deg=NAN,rate_dps=NAN,rpm=NAN;
+  };
   struct SpanPositiveDecision {
     uint32_t ms=0; uint16_t width=0; int16_t ma=0; int8_t sign=0;
     float target_mj=NAN; bool executed=false;

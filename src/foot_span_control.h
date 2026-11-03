@@ -9,6 +9,9 @@ namespace foot_span_control {
 struct Cycle {
   uint32_t start_ms=0, end_ms=0, positive_ms=0;
   float left=NAN, right=NAN, negative_peak=NAN, target_mj=NAN;
+  // Context of the negative input: comparisons must not silently treat
+  // different early-trigger angles or incoming mechanical states as equal.
+  float negative_trigger_deg=0.f,negative_rate_dps=0.f,negative_rpm=0.f;
   uint32_t negative_key=0;
   uint16_t positive_width=0;
   int16_t positive_ma=0;
@@ -29,6 +32,10 @@ class Controller {
   float referenceError()const{return filtered_error_;}
   unsigned acceptedProbeCycles()const{return updates_;}
   int offset()const{return offset_ms_;}
+  // Earlier 400mA runs tried the negative offset repeatedly while right
+  // turning remained. The 1200mA branch starts its own exploratory trial in
+  // the opposite direction; its response is not assumed to be the same.
+  void preferHighCurrentFirst(){if(!high_current_initial_){polarity_=1;high_current_initial_=true;}}
   bool selectorUnavailable(uint32_t now) {
     if(fault())return false;
     // A different selector is not a hardware fault. Cancel experimental
@@ -51,7 +58,9 @@ class Controller {
        c.positive_sign!=1 || c.start_ms>=c.positive_ms || c.positive_ms>=c.end_ms ||
        !std::isfinite(c.left) || !std::isfinite(c.right) || c.left<0 || c.right<0 ||
        !std::isfinite(c.negative_peak) || c.negative_peak<=0 ||
-       !std::isfinite(c.target_mj) || c.target_mj<=0) {
+       !std::isfinite(c.target_mj) || c.target_mj<=0 ||
+       !std::isfinite(c.negative_trigger_deg) || !std::isfinite(c.negative_rate_dps) ||
+       !std::isfinite(c.negative_rpm)) {
       invalidateObservation();return;
     }
     const Actual* action=nullptr;unsigned actions=0;
@@ -79,6 +88,8 @@ class Controller {
     observed_left_=c.left;observed_right_=c.right;observed_peak_=c.negative_peak;
     observed_error_=e;observed_current_=c.positive_ma;observed_target_=c.target_mj;
     observed_negative_key_=c.negative_key;
+    observed_negative_trigger_=c.negative_trigger_deg;
+    observed_negative_rate_=c.negative_rate_dps;observed_negative_rpm_=c.negative_rpm;
     observed_baseline_=action->baseline;
     have_observation_=true;
     if(!have_reference_) {
@@ -99,7 +110,10 @@ class Controller {
     if(trial_active_) {
       const int base_delta=static_cast<int>(action->baseline)-static_cast<int>(trial_baseline_);
       if(!trial_reference_valid_ || c.positive_ma!=trial_current_ || std::fabs(c.target_mj-trial_target_)>.05f ||
-         base_delta>5 || base_delta< -5 || !comparableNegative(c.negative_key,trial_negative_key_)) {
+         base_delta>5 || base_delta< -5 || !comparableNegative(c.negative_key,trial_negative_key_) ||
+         std::fabs(c.negative_trigger_deg-trial_negative_trigger_)>.5f ||
+         std::fabs(c.negative_rate_dps-trial_negative_rate_)>10.f ||
+         std::fabs(c.negative_rpm-trial_negative_rpm_)>100.f) {
         invalidateObservation();return;
       }
       const float weak=trial_right_?c.right:c.left;
@@ -218,6 +232,8 @@ class Controller {
           trial_weak_=trial_right_?observed_right_:observed_left_;
           trial_peak_=observed_peak_;trial_current_=ma;trial_target_=request_target_mj_;trial_baseline_=baseline_ms_;
           trial_negative_key_=observed_negative_key_;
+          trial_negative_trigger_=observed_negative_trigger_;
+          trial_negative_rate_=observed_negative_rate_;trial_negative_rpm_=observed_negative_rpm_;
           const int before_delta=static_cast<int>(observed_baseline_)-static_cast<int>(baseline_ms_);
           trial_reference_valid_=observed_current_==ma && std::fabs(observed_target_-request_target_mj_)<=.05f &&
               before_delta<=5 && before_delta>= -5;
@@ -237,7 +253,7 @@ class Controller {
     pending_change_=confirmed_offset_!=0;
     state_=pending_change_?State::Restore:State::Collect;
   }
-  static bool supportedCurrent(int16_t ma){return ma==300 || ma==350 || ma==400;}
+  static bool supportedCurrent(int16_t ma){return ma==300 || ma==350 || ma==400 || ma==1200;}
   // Keep distinct negative inputs out of the same response comparison.
   // A 10 ms tolerance accommodates observed normal negative pulse changes;
   // similar commands still do not establish an isolated causal response.
@@ -258,6 +274,8 @@ class Controller {
   int16_t request_ma_=0;
   float request_target_mj_=NAN,filtered_error_=0,reference_peak_=0,reference_left_=0,reference_right_=0;
   float observed_left_=0,observed_right_=0,observed_peak_=0,observed_error_=0,observed_target_=0;
+  float observed_negative_trigger_=0,observed_negative_rate_=0,observed_negative_rpm_=0;
+  float trial_negative_trigger_=0,trial_negative_rate_=0,trial_negative_rpm_=0;
   float trial_ratio_=0,trial_weak_=0,trial_peak_=0,trial_target_=0;
   float trial_ratio_sum_=0,trial_weak_sum_=0,trial_peak_sum_=0;
   int16_t observed_current_=0,trial_current_=0;uint16_t observed_baseline_=0,trial_baseline_=0;unsigned trial_count_=0;
@@ -265,5 +283,6 @@ class Controller {
   int offset_ms_=0,confirmed_offset_=0,polarity_=-1;
   unsigned consecutive_=0,weak_count_=0,updates_=0;
   bool have_reference_=false,pending_=false,request_changed_=false,pending_change_=false,request_eligible_=false;
+  bool high_current_initial_=false;
 };
 }

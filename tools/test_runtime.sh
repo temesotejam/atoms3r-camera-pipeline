@@ -24,6 +24,9 @@ g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_span_candidate.cp
 /tmp/test_foot_span_candidate
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_span_control.cpp -o /tmp/test_foot_span_control
 /tmp/test_foot_span_control
+python3 tools/test_foot_span_context_wiring.py
+g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_feedback_stress.cpp -o /tmp/test_foot_feedback_stress
+/tmp/test_foot_feedback_stress
 
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_stroke_observer.cpp -o /tmp/test_foot_stroke_observer
 /tmp/test_foot_stroke_observer

@@ -2912,16 +2912,20 @@ void ExperimentRunner::processFootSpanCycle() {
   for(const auto& d:span_positive_decisions_) if(d.ms>span.start_ms && d.ms<span.end_ms) {positive=&d;++positives;}
   foot_span_control::Cycle cycle;
   cycle.start_ms=span.start_ms;cycle.end_ms=span.end_ms;
-  cycle.left=span.left.span;cycle.right=span.right.span;
+  cycle.left=span.left.trimmed_span;cycle.right=span.right.trimmed_span;
   cycle.negative_peak=peak ? peak->amplitude : NAN;
   // Distinct actual negative drive pulses must never be compared as though
   // their observed response came from the same motor command. All explicit
   // valid coasts are equivalent zero command regardless of model coverage.
   if(negatives==1 && negative) {
     const auto& n=negative->value;
-    if(n.mode==foot_phase_cap::NegativeMode::Coast || n.mode==foot_phase_cap::NegativeMode::UnmodeledCoast) {
+    cycle.negative_trigger_deg=negative->trigger_deg;
+    cycle.negative_rate_dps=negative->rate_dps;cycle.negative_rpm=negative->rpm;
+    const bool context_ok=std::isfinite(cycle.negative_trigger_deg) &&
+        std::isfinite(cycle.negative_rate_dps) && std::isfinite(cycle.negative_rpm);
+    if(context_ok && (n.mode==foot_phase_cap::NegativeMode::Coast || n.mode==foot_phase_cap::NegativeMode::UnmodeledCoast)) {
       cycle.negative_known=true;cycle.negative_key=1;
-    } else if(n.mode==foot_phase_cap::NegativeMode::Powered) {
+    } else if(context_ok && n.mode==foot_phase_cap::NegativeMode::Powered) {
       cycle.negative_known=true;
       cycle.negative_key=0x80000000u | (static_cast<uint32_t>(n.ma)<<16) |
           (n.sign<0 ? 0x8000u : 0u) | static_cast<uint32_t>(n.width);
@@ -3518,14 +3522,34 @@ bool ExperimentRunner::tryTiltPriority(
       std::isfinite(event.zero_cross_abs_rate_dps) && event.zero_cross_abs_rate_dps>0.f &&
       event.pre_input_wheel_speed_valid && event.pre_input_wheel_speed_age_us<=50000 &&
       std::isfinite(event.pre_input_wheel_speed_rpm);
-  const auto choice=tilt_priority_.propose(in);
+  auto choice=tilt_priority_.propose(in);
   // Record every accepted healthy crossing, even when ordinary control is
   // selected. It will be paired with the corresponding measured peak.
   if(in.hardware_healthy)tilt_priority_.crossing(in.next_side,t_test_ms);
   if(!choice.selected)return false;
-  // This is a deliberately unmodeled 1200mA experiment. Foot feedback and
-  // old fitted energy learners do not own or learn from this command.
-  foot_span_control_.reset();weak_side_assist_.interrupt();
+  // The 1200mA action is unmodeled. Trial a camera-based offset only on the
+  // positive-side pulse, retaining the hardware and historical timing caps.
+  // Actual sent commands, complete cycles and matched negative-side context
+  // are required by foot_span_control before any outcome is evaluated.
+  weak_side_assist_.interrupt();
+  bool foot_adjusted=false;
+  if(!choice.coast && in.next_side>0 && choice.width_ms<=100 && tilt_priority_.target()>=6.f) {
+    foot_span_control_.preferHighCurrentFirst();
+    const uint16_t baseline=choice.width_ms;
+    uint16_t cap=tilt_priority_.timingCap(in.next_side,t_test_ms,in.hardware_cap_ms);
+    const uint16_t exploratory_cap=static_cast<uint16_t>(baseline+30u);
+    if(cap>exploratory_cap)cap=exploratory_cap;
+    if(cap>100)cap=100;
+    event.foot_span_baseline_ms=baseline;
+    event.foot_span_requested_ms=foot_span_control_.limit(t_test_ms,baseline,
+        choice.current_ma,choice.direction,cap,true,event.target_energy_j*1000.f);
+    choice.width_ms=event.foot_span_requested_ms;
+    foot_adjusted=choice.width_ms!=baseline;
+  } else if(!choice.coast && in.next_side>0) {
+    // Preserve the gradual startup and never truncate a legitimate ordinary
+    // pulse over the camera experiment's 100 ms cap.
+    (void)foot_span_control_.selectorUnavailable(t_test_ms);
+  }
   event.work_control_branch=15;event.energy_model_extrapolated=true;
   event.work_prediction_cross_condition=true;
   event.work_brake_cap_ms=choice.width_ms;
@@ -3556,6 +3580,8 @@ bool ExperimentRunner::tryTiltPriority(
   }
   tilt_priority_.confirm(in.next_side,t_test_ms,choice,true);
   event.valid=true;event.output_executed=!choice.coast;
+  event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_selected,
+      foot_adjusted && event.output_executed);
   event.reason=choice.coast ? Config::ENERGY_CONTROL_AUTONOMOUS_REASON_VALID_NO_OUTPUT
                             : Config::ENERGY_CONTROL_AUTONOMOUS_REASON_NONE;
   pending_cg_shift_mm_=run_cg_shift_mm_;pending_target_energy_j_=event.target_energy_j;
@@ -3907,6 +3933,13 @@ void ExperimentRunner::finishFootEnergyDecision(PsramLogger::EnergyControlAutono
           event.reason==Config::ENERGY_CONTROL_AUTONOMOUS_REASON_NONE,
           event.reason==Config::ENERGY_CONTROL_AUTONOMOUS_REASON_VALID_NO_OUTPUT,
           event.command_current_mA,event.q_command_direction,event.pulse_width_ms,event.work_control_branch);
+      d.trigger_deg=std::isfinite(event.detector_angle_before_deg) &&
+          std::isfinite(event.detector_angle_after_deg) && std::isfinite(event.detector_crossing_alpha)
+          ? event.detector_angle_before_deg+event.detector_crossing_alpha*
+              (event.detector_angle_after_deg-event.detector_angle_before_deg) : NAN;
+      d.rate_dps=event.zero_cross_abs_rate_dps;
+      d.rpm=event.pre_input_wheel_speed_valid && event.pre_input_wheel_speed_age_us<=50000
+          ? event.pre_input_wheel_speed_rpm : NAN;
       phase_negative_decision_next_=(phase_negative_decision_next_+1)%8;
     } else if(event.physical_next_peak_side>0) {
       if(event.work_control_branch!=14 && positive_left_input_.now_ms==t_ms)
@@ -3917,8 +3950,12 @@ void ExperimentRunner::finishFootEnergyDecision(PsramLogger::EnergyControlAutono
       d.sign=event.q_command_direction;d.target_mj=event.target_energy_j*1000.f;
       d.executed=event.output_executed;
       span_positive_decision_next_=(span_positive_decision_next_+1)%8;
-      foot_span_control_.confirm(t_ms,event.output_executed,event.command_current_mA,
-          event.q_command_direction,event.pulse_width_ms);
+      if(event.work_control_branch==15 && (event.pulse_width_ms>100 || tilt_priority_.target()<6.f)) {
+        (void)foot_span_control_.selectorUnavailable(t_ms);
+      } else {
+        foot_span_control_.confirm(t_ms,event.output_executed,event.command_current_mA,
+            event.q_command_direction,event.pulse_width_ms);
+      }
     }
     // Legacy signed-phase event fields are no longer persisted; raw foot
     // frames and body peak records remain available for offline reconstruction.
