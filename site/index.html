@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#111827">
   <title>AtomS3R 左右揺動エネルギー制御</title>
   <link rel="stylesheet" href="styles.css">
+  <script src="flasher-completion.js?v=20261103"></script>
   <script type="module" src="https://unpkg.com/esp-web-tools@10.1.1/dist/web/install-button.js?module"></script>
 </head>
 <body>
@@ -19,7 +20,7 @@
     <section class="panel important">
       <h2>書き込みと測定</h2>
       <p><strong>公開バージョン：1.0.73（試験版）</strong>。目標8°の歩行では、左右の揺れが目標に近づくことを優先し、条件に応じて両側に1200 mAの入力を試します。実電流は指令値とは限らず、実機の揺れや歩行への効果は未確認です。</p>
-      <p>書き込み時はPCをインターネットにつながるWi-Fiまたは有線LANへ接続し、AtomS3RをUSBでつないでください。PC版ChromeまたはEdgeで下のボタンを押します。機体のWi-Fiへ切り替えるのは書き込み完了後です。</p>
+      <p>書き込み時はPCをインターネットにつながるWi-Fiまたは有線LANへ接続し、AtomS3RをUSBでつないでください。PC版ChromeまたはEdgeで下のボタンを押し、ポートを選ぶと書き込みが始まります。デバイス全体は消去せず、必要な領域を書き換えます。機体のWi-Fiへ切り替えるのは書き込み完了後です。</p>
       <esp-web-install-button manifest="manifest-freefoot-runtime-v2.json">
         <button slot="activate" class="primary">左右揺動エネルギー制御を書き込む</button>
         <span slot="unsupported" class="warning">PC版ChromeまたはEdgeを使用してください。</span>
@@ -230,6 +231,5 @@
   </script>
   <script src="serial-monitor.js" defer></script>
   <script src="soft-boot.js" defer></script>
-  <script src="flasher-completion.js" defer></script>
 </body>
 </html>
