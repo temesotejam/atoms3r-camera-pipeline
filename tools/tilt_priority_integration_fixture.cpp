@@ -1,4 +1,5 @@
 #include "tilt_priority.h"
+#include "wheel_cycle_guard.h"
 #include "foot_span_control.h"
 #include "peak_error_adaptation.h"
 #include <cassert>
@@ -41,6 +42,7 @@ struct Adaptive {bool broken=false;void breakPair(){broken=true;}};
 class ExperimentRunner {public:
  Status status_;Imu imu_obj;Roller roller_obj;Imu* imu_=&imu_obj;Roller* roller_=&roller_obj;
  tilt_priority::Controller tilt_priority_;foot_span_control::Controller foot_span_control_;
+ wheel_cycle_guard::Controller wheel_cycle_guard_;
  Resettable weak_side_assist_,walking_loss_feedback_,walking_low_speed_guard_;
  Adaptive adaptive_cg_;bool mode=true,begin_ok=true;unsigned calls=0;int sign=0,ma=0;uint16_t width=0;
  float run_cg_shift_mm_=0,pending_cg_shift_mm_=0,pending_target_energy_j_=NAN;
@@ -132,14 +134,13 @@ int main(){
   assert(e2.q_command_direction==0&&e2.q_command_mA_s==0);
   assert(r.energy_control_autonomous_pending_peak_&&r.energy_control_autonomous_pending_probe_);
   assert(r.energy_control_autonomous_pending_mode_==peak_error_adaptation::Coast);
-  // Synthetic later peaks test that coast remains in control and output can
-  // resume after the old large peak has been replaced by low measurements.
+  // Synthetic return peak after one coast permits a short recovery pulse.
   r.tilt_priority_.peak(1,1098,3.8f);
   Event e3;e3.physical_next_peak_side=-1;assert(r.tryTiltPriority(e3,1300));
-  assert(e3.valid&&!e3.output_executed&&r.calls==1);
+  assert(e3.valid&&e3.output_executed&&e3.pulse_width_ms==15&&r.calls==2);
   r.tilt_priority_.peak(-1,1500,3.5f);
   Event e4;assert(r.tryTiltPriority(e4,1700));
-  assert(e4.output_executed&&r.calls==2&&e4.command_current_mA==1200);
+  assert(e4.output_executed&&r.calls==3&&e4.command_current_mA==1200);
  }
  {ExperimentRunner r;Event e;r.begin_ok=false;assert(r.tryTiltPriority(e,1000));
   assert(!e.valid&&!e.output_executed&&e.pulse_width_ms==0&&e.reason==12);

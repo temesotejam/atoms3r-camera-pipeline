@@ -2543,7 +2543,7 @@ void ExperimentRunner::resetEnergyControlAutonomous() {
   foot_balance_.reset(status_.run_id);foot_energy_.reset(status_.run_id);wheel_speed_balance_.reset();gradual_start_.reset();foot_frame_run_id_=0;
   foot_phase_observer_.reset(status_.run_id);foot_phase_cap_.reset();phase_observer_sequence_=0;
   foot_span_observer_.reset(status_.run_id);foot_span_control_.reset();weak_side_assist_.reset();
-  positive_left_boost_.reset();positive_left_input_=positive_left_boost::Input{};tilt_priority_.reset();span_observer_sequence_=0;
+  positive_left_boost_.reset();positive_left_input_=positive_left_boost::Input{};tilt_priority_.reset();wheel_cycle_guard_.reset();span_observer_sequence_=0;
   span_positive_decision_next_=0;
   for (auto& x:span_positive_decisions_) x=SpanPositiveDecision{};
   for (auto& x:span_positive_context_) x=SpanPositiveContext{};
@@ -3562,6 +3562,16 @@ bool ExperimentRunner::tryTiltPriority(
     // Preserve the gradual startup and never truncate a legitimate ordinary
     // pulse over the camera experiment's 100 ms cap.
     (void)foot_span_control_.selectorUnavailable(t_test_ms);
+  }
+  // Apply after camera adjustments, so they cannot undo the wheel guard.
+  // Coast observations also update the pair but never acquire a new pulse.
+  const uint16_t before_wheel_guard=choice.width_ms;
+  choice.width_ms=wheel_cycle_guard_.limit(in.next_side,event.pre_input_wheel_speed_rpm,
+      in.hardware_healthy,t_test_ms,choice.width_ms);
+  if(in.next_side>0 && choice.width_ms!=before_wheel_guard) {
+    // A truncated camera candidate is not the candidate that was requested.
+    (void)foot_span_control_.selectorUnavailable(t_test_ms);
+    foot_adjusted=false;
   }
   event.work_control_branch=15;event.energy_model_extrapolated=true;
   event.work_prediction_cross_condition=true;

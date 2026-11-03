@@ -1,6 +1,6 @@
 {
   "name": "AtomS3R Lateral Energy Control",
-  "version": "1.0.78-observation-quality",
+  "version": "1.0.79-wheel-cycle-trial",
   "new_install_improv_wait_time": 0,
   "builds": [
     {

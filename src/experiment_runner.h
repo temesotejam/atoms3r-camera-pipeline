@@ -24,6 +24,7 @@
 #include "weak_side_assist.h"
 #include "positive_left_boost.h"
 #include "tilt_priority.h"
+#include "wheel_cycle_guard.h"
 #include "target12_state_work.h"
 #include "peak_error_adaptation.h"
 #include "upright_reference.h"
@@ -810,4 +811,6 @@ private:
   // Place this additional camera-feedback array after the motion state so
   // these per-event fields do not shift hot members that follow the ring.
   SpanPositiveContext span_positive_context_[8];
+  // Keep the experimental wheel state after the hot motion fields.
+  wheel_cycle_guard::Controller wheel_cycle_guard_;
 };

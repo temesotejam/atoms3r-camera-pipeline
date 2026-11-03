@@ -16,6 +16,22 @@ static Choice step(Controller& c,int side,uint32_t cross,float peak,bool accepte
   c.peak(side,cross+elapsed,peak);return choice;
 }
 int main() {
+  // Run 464: one coast is retained after a large incoming peak, but a
+  // second coast is replaced by a small startup trial once the return peak
+  // has fallen. The replay does not predict the physical result.
+  Controller early;early.peak(1,235,2.30266f);
+  auto drive1=early.propose(input(-1,417));
+  early.crossing(-1,417);early.confirm(-1,417,drive1,true);early.peak(-1,608,5.42757f);
+  Input in2=input(1,814);in2.crossing_rate_dps=33.2032f;
+  auto drive2=early.propose(in2);
+  early.crossing(1,814);early.confirm(1,814,drive2,true);early.peak(1,995,6.32329f);
+  Input in3=input(-1,1235);in3.crossing_rate_dps=34.2564f;
+  auto first_coast=early.propose(in3);assert(first_coast.coast);
+  early.crossing(-1,1235);early.confirm(-1,1235,first_coast,true);early.peak(-1,1421,3.86672f);
+  Input in4=input(1,1640);in4.crossing_rate_dps=25.1239f;
+  auto recovery=early.propose(in4);
+  assert(recovery.selected && !recovery.coast && recovery.width_ms==15);
+  in4.hardware_healthy=false;assert(!early.propose(in4).selected);
   // Regression for run 30224541: the kickoff peak is an isolated half-step,
   // and the big opposite peak forbids a second 1200mA pulse on the way back.
   Controller c;assert(c.target()==4.5f);

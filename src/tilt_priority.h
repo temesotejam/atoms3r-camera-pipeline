@@ -89,7 +89,11 @@ class Controller {
       h.cross_ms==ms && std::isfinite(choice.target_deg) &&
       (choice.coast ? choice.width_ms==0 && choice.current_ma==0 :
         choice.width_ms>0 && choice.current_ma==1200);
-    if(h.confirmed){h.command_ms=choice.width_ms;h.was_drive=!choice.coast;h.command_target=choice.target_deg;}
+    if(h.confirmed){
+      h.command_ms=choice.width_ms;h.was_drive=!choice.coast;h.command_target=choice.target_deg;
+      if(choice.coast) { last_coast_ms_=ms;last_coast_side_=side; }
+      else { last_coast_ms_=0;last_coast_side_=0; }
+    } else { last_coast_ms_=0;last_coast_side_=0; }
   }
 
   __attribute__((noinline)) void peak(int8_t side,uint32_t ms,float angle) {
@@ -155,9 +159,18 @@ class Controller {
     // A large incoming opposite peak can carry considerable energy to the
     // next side. Do not add another full input merely because the earlier
     // same-side peak was a small startup half step. This is not a stop.
-    if((opposite_fresh && opposite.peak_deg>target+1.5f) || (fresh && h.peak_deg>target+1.5f)) {
-      out.selected=true;out.coast=true;return out;
-    }
+    const bool overshoot=(opposite_fresh && opposite.peak_deg>target+1.5f) ||
+                         (fresh && h.peak_deg>target+1.5f);
+    // A preceding coast followed by a small returning peak can leave the
+    // first oscillation without input for two halves. In this narrow startup
+    // case try only 15 ms, retaining hardware and time-to-peak constraints.
+    // This is a trial, not a guarantee of the next physical amplitude.
+    const bool recovery=overshoot && target<=5.5f && last_coast_ms_ &&
+        last_coast_side_==-in.next_side && in.now_ms>last_coast_ms_ &&
+        in.now_ms-last_coast_ms_<=1500 && fresh && opposite_fresh &&
+        opposite.peak_deg<=target+.5f && h.peak_deg<=target+2.5f &&
+        in.crossing_rate_dps<target*10.f;
+    if(overshoot && !recovery) {out.selected=true;out.coast=true;return out;}
     uint16_t cap=in.hardware_cap_ms<150 ? in.hardware_cap_ms : 150;
     if(h.width_ms<cap)cap=h.width_ms;
     if(fresh && h.paired_ms==h.peak_ms && h.elapsed_ms) {
@@ -165,6 +178,7 @@ class Controller {
       if(h.elapsed_ms<=30) {out.selected=true;out.coast=true;return out;}
       if(cap>h.elapsed_ms-30)cap=static_cast<uint16_t>(h.elapsed_ms-30);
     }
+    if(recovery && cap>15)cap=15;
     if(in.crossing_rate_dps>low_rate && cap>20) {
       const float fraction=std::fmax(0.f,(high_rate-in.crossing_rate_dps)/(high_rate-low_rate));
       cap=static_cast<uint16_t>(20.f+(cap-20)*fraction);
@@ -201,6 +215,8 @@ class Controller {
   uint8_t pair_mask_=0,good_pairs_=0;
   uint8_t foot_weak_count_=0;
   uint32_t foot_end_=0;
+  uint32_t last_coast_ms_=0;
+  int8_t last_coast_side_=0;
   int8_t last_pair_side_=0;
   bool initial_peak_seen_=false,pair_good_=true;
 };
