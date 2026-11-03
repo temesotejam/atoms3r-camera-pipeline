@@ -32,6 +32,36 @@ class Controller {
   float target()const{return target_deg_;}
   uint16_t widthLimit(int side)const{return history_[index(side)].width_ms;}
 
+  // Completed camera-relative full-cycle spans are a comparative signal,
+  // not ground displacement. Never infer polarity from one frame or a first
+  // half step. Invalid/stale input clears the experimental timing request.
+  __attribute__((noinline)) void footCycle(uint32_t start,uint32_t end,float left,float right,bool usable) {
+    if(!end || end<=foot_end_)return;
+    const bool continuous=foot_end_ && start==foot_end_;
+    foot_end_=end;
+    if(!usable || start>=end || !std::isfinite(left) || !std::isfinite(right) ||
+       left<1.f || right<0.f || right>=left*.6f || left-right<.5f) {
+      foot_weak_count_=0;return;
+    }
+    foot_weak_count_=continuous ? (foot_weak_count_<2 ? foot_weak_count_+1 : 2) : 1;
+  }
+  // Trial: at the return from the positive body peak, allow an inward
+  // threshold up to one degree before absolute zero. The negative excursion
+  // has been the weak one in run 590. Persistent camera evidence can request
+  // this sooner; otherwise require a large observed peak imbalance. This is
+  // an input timing experiment, not a measured ground step or guarantee.
+  __attribute__((noinline)) float negativeEarlyThreshold(uint32_t now,int peak_side) const {
+    if(peak_side!=1 || !now)return 0.f;
+    const History& plus=history_[1];const History& minus=history_[0];
+    if(!plus.peak_ms || !minus.peak_ms || now<plus.peak_ms || now<minus.peak_ms ||
+       now-plus.peak_ms>1500 || now-minus.peak_ms>2500 ||
+       !std::isfinite(plus.peak_deg) || !std::isfinite(minus.peak_deg))return 0.f;
+    const bool observed_foot=foot_weak_count_>=2 && now>=foot_end_ && now-foot_end_<=2500;
+    const float gap=plus.peak_deg-minus.peak_deg;
+    if(!(gap>=3.f || (observed_foot && gap>=1.f)))return 0.f;
+    return std::fmin(1.f,plus.peak_deg*.2f);
+  }
+
   // The crossing and its accepted result have run-relative timestamps. A
   // result is usable only after confirm and a subsequently paired peak.
   void crossing(int8_t side,uint32_t ms) {
@@ -155,6 +185,8 @@ class Controller {
   History history_[2];
   float target_deg_=4.5f;
   uint8_t pair_mask_=0,good_pairs_=0;
+  uint8_t foot_weak_count_=0;
+  uint32_t foot_end_=0;
   int8_t last_pair_side_=0;
   bool initial_peak_seen_=false,pair_good_=true;
 };

@@ -2896,6 +2896,13 @@ void ExperimentRunner::processFootSpanCycle() {
   const auto& span=foot_span_observer_.latest();
   if(span.sequence==span_observer_sequence_)return;
   span_observer_sequence_=span.sequence;
+  const bool timing_quality=span.valid &&
+      (span.left.both_directions || span.left.low_signal) &&
+      (span.right.both_directions || span.right.low_signal) &&
+      !span.left.single_outlier && !span.right.single_outlier &&
+      !span.left.edge_unverified && !span.right.edge_unverified;
+  tilt_priority_.footCycle(span.start_ms,span.end_ms,
+      span.left.trimmed_span,span.right.trimmed_span,timing_quality);
   const PhaseNegativePeak* peak=nullptr;
   const PhaseNegativeDecision* negative=nullptr;
   const SpanPositiveDecision* positive=nullptr;
@@ -3139,8 +3146,11 @@ void ExperimentRunner::updateEnergyControlAutonomousMotion(uint32_t now_ms) {
     updateEnergyControlAutonomousPeakTracker(now_ms, peak_relative_angle_deg, rate_dps);
   }
   const int8_t peak_side = energy_control_autonomous_last_peak_side_;
-  const float threshold_deg = peak_side * energy_control_autonomous_last_peak_amplitude_deg_ *
+  float threshold_deg = peak_side * energy_control_autonomous_last_peak_amplitude_deg_ *
       (energy_control_autonomous_input_peak_percent_ * 0.01f);
+  if(wheelWorkMode() && energy_control_autonomous_target_peak_deg_==8.f &&
+     energy_control_autonomous_input_peak_percent_==0 && peak_side==1)
+    threshold_deg=tilt_priority_.negativeEarlyThreshold(t_test_ms,peak_side);
   const bool peak_just_confirmed = was_waiting_for_peak &&
       energy_control_autonomous_half_cycle_state_ == EnergyControlAutonomousHalfCycleState::WAIT_ZERO_CROSS;
   // At 100% (or a threshold already passed during peak confirmation), fire

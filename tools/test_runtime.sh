@@ -11,6 +11,9 @@ python3 tools/test_positive_boost_integration.py
 python3 tools/test_walking_pulse_limits.py
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_tilt_priority.cpp -o /tmp/test_tilt_priority
 /tmp/test_tilt_priority
+g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_timing.cpp -o /tmp/test_foot_timing
+/tmp/test_foot_timing
+python3 tools/test_foot_timing_wiring.py
 python3 tools/test_tilt_priority_integration.py
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_positive_left_boost.cpp -o /tmp/test_positive_left_boost
 /tmp/test_positive_left_boost
