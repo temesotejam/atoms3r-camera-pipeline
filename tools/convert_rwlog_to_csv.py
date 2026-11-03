@@ -1150,6 +1150,7 @@ ENERGY_CONTROL_AUTONOMOUS_ZERO_CROSS_COLUMNS = [
     "predicted_post_input_work_j", "predicted_work_change_j",
     "foot_span_left_deg", "foot_span_right_deg", "foot_span_trimmed_left_deg", "foot_span_trimmed_right_deg",
     "foot_span_start_ms", "foot_span_end_ms", "foot_span_baseline_ms", "foot_span_requested_ms",
+    "wheel_guard_legacy_ms", "wheel_guard_extra_ms", "wheel_guard_trial_eligible",
     "foot_span_state", "foot_span_accepted_cycles", "foot_span_valid", "foot_span_selected",
     "foot_span_startup", "foot_span_left_low", "foot_span_right_low", "foot_span_left_both",
     "foot_span_right_both", "foot_span_continuous", "foot_span_left_outlier", "foot_span_right_outlier",

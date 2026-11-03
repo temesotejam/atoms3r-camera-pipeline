@@ -368,6 +368,8 @@ class PsramLogger {
     float foot_balance_left_mean = NAN, foot_balance_right_mean = NAN;
     float startup_target_deg=NAN;
     uint16_t startup_positive_cap_ms=0;
+    uint16_t wheel_guard_legacy_ms=0,wheel_guard_extra_ms=0;
+    bool wheel_guard_trial_eligible=false;
     float foot_energy_bias=NAN,foot_energy_left_px=NAN,foot_energy_right_px=NAN;
     bool foot_energy_valid=false;uint8_t foot_energy_phase=0,foot_energy_reason=0;
     float low_peak_bias_mj=NAN,low_peak_base_prediction_mj=NAN,low_peak_applied_bias_mj=NAN;

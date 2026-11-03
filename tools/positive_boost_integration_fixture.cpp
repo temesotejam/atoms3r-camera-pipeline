@@ -1,5 +1,6 @@
 #include "positive_left_boost.h"
 #include "tilt_priority.h"
+#include "wheel_cycle_guard.h"
 #include "wheel_work_energy_control.h"
 #include "peak_error_adaptation.h"
 #include "gradual_start.h"
@@ -15,7 +16,7 @@ constexpr uint8_t ENERGY_CONTROL_AUTONOMOUS_REASON_NONE=0;
 enum class ExperimentState { RUNNING_BATCH_SWEEP, STOPPED };
 uint32_t millis(){return 123456;}
 namespace PsramLogger {
-struct EnergyControlAutonomousPeakEvent {bool peak_speed_valid;uint32_t peak_speed_age_us;};
+struct EnergyControlAutonomousPeakEvent {bool peak_speed_valid;uint32_t peak_speed_age_us;bool pending_command_matched;};
 struct EnergyControlAutonomousZeroCrossEvent {
   uint32_t previous_peak_time_ms=800,zero_cross_time_ms=997;
   int8_t physical_next_peak_side=1,previous_peak_side=-1,q_command_direction=0;
@@ -48,6 +49,8 @@ class ExperimentRunner {
   FakeImu* imu_=&imu_obj;FakeRoller* roller_=&roller_obj;
   positive_left_boost::Input positive_left_input_;positive_left_boost::Controller positive_left_boost_;
   tilt_priority::Controller tilt_priority_;
+  wheel_cycle_guard::Controller wheel_cycle_guard_;
+  peak_error_adaptation::Mode energy_control_autonomous_pending_mode_=peak_error_adaptation::Coast;
   FakeGradual gradual_start_;float energy_control_autonomous_target_peak_deg_=8.f;
   float run_cg_shift_mm_=0,pending_cg_shift_mm_=0,pending_target_energy_j_=NAN;
   bool energy_control_autonomous_pending_peak_=false,energy_control_autonomous_pending_probe_=false;
@@ -76,7 +79,7 @@ class ExperimentRunner {
     // NORMAL_SOURCE
   }
   void feedPeak(int8_t physical_side,uint32_t peak_ms,float amplitude_deg,bool valid) {
-    PsramLogger::EnergyControlAutonomousPeakEvent event{valid,valid?100u:999999u};
+    PsramLogger::EnergyControlAutonomousPeakEvent event{valid,valid?100u:999999u,false};
     notifyPositiveLeftPeak(physical_side,peak_ms,amplitude_deg,event);
   }
 };

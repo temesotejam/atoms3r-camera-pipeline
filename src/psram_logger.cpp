@@ -450,7 +450,7 @@ bool PsramLogger::buildMetadataJson(PsramString& json) const {
       (q_ident_mode_ ? "rwlog_q_ident_fixed_schedule" :
        (passive_capture_ ? "rwlog_passive_absolute_roll_free_decay" : "rwlog_dynamic_beta_vbat_hold_time_compare")))) + "\",";
   json += "\"firmware_revision\":\"" RUNTIME_VERSION "\",";
-  json += "\"wheel_cycle_trial\":{\"policy\":\"branch15_fresh_opposite_crossing_rpm_midpoint_over_150rpm_shortens_same_direction_pulse_up_to_25_percent;no_reverse_or_added_torque;15ms_after_one_startup_coast_and_small_return_peak_under_narrow_gates\",\"hardware_validated\":false},";
+  json += "\"wheel_cycle_trial\":{\"policy\":\"branch15_prior_midpoint_guard_retained;trial_after_four_matched_fresh_alternating_peaks_both_at_least_4p5deg_pair_difference_at_most_2deg;no_extra_shortening_on_weaker_or_declining_side;midpoint_over_100rpm_at_most_5ms_extra_beyond_prior_guard;no_reverse_or_added_torque;15ms_startup_recovery_retained\",\"hardware_validated\":false},";
   json += "\"foot_camera_required_for_autonomous_start\":false,";
   json += "\"steering\":{\"revision\":\"amplitude_only_04730\",\"enabled\":false,\"profile\":\"disabled\",\"feedback_enabled\":false,\"heading_enabled\":false,\"response_check_enabled\":false,\"targets\":\"selected_target_for_both_sides;command_target_latched_until_response_peak\",\"previous_peak_target_gate\":\"disabled_in_04731;retired_8deg_residual\",\"v53_fields\":\"heading_and_difference_unavailable;delta_and_cycles_zero;gyro_valid_false\",\"reason_codes\":{\"8\":\"disabled\"}},";
   const auto placement = RuntimeDiag::executionSnapshot();
@@ -1675,6 +1675,9 @@ bool PsramLogger::buildMetadataJson(PsramString& json) const {
     appendAutonomousNullable("foot_balance_right_mean", e.foot_balance_right_mean, 5);
     appendAutonomousNullable("startup_target_deg", e.startup_target_deg, 5);
     detail += ",\"startup_positive_cap_ms\":" + String(e.startup_positive_cap_ms);
+    detail += ",\"wheel_guard_legacy_ms\":" + String(e.wheel_guard_legacy_ms);
+    detail += ",\"wheel_guard_extra_ms\":" + String(e.wheel_guard_extra_ms);
+    detail += ",\"wheel_guard_trial_eligible\":" + String(e.wheel_guard_trial_eligible ? "true" : "false");
     appendAutonomousNullable("foot_energy_bias",e.foot_energy_bias,5);
     appendAutonomousNullable("foot_energy_left_px",e.foot_energy_left_px,4);
     appendAutonomousNullable("foot_energy_right_px",e.foot_energy_right_px,4);

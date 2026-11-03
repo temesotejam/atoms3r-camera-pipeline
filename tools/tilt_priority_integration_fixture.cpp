@@ -21,6 +21,7 @@ struct EnergyControlAutonomousZeroCrossEvent {
  uint16_t vbat_mV=7500;bool pre_input_wheel_speed_valid=true;uint32_t pre_input_wheel_speed_age_us=100;
  bool side_mismatch_diagnostic=false,energy_model_extrapolated=false,work_prediction_cross_condition=false;
  uint8_t work_control_branch=0,reason=0;uint16_t work_brake_cap_ms=0,solver_selected_integer_width_ms=0;
+ uint16_t wheel_guard_legacy_ms=0,wheel_guard_extra_ms=0;bool wheel_guard_trial_eligible=false;
  float passive_energy_j=1,free_next_peak_amplitude_deg=1,predicted_energy_j=1,predicted_observed_energy_j=1;
  float predicted_next_peak_amplitude_deg=1,predicted_observed_next_peak_deg=1,predicted_wheel_work_j=1;
  float predicted_input_work_j=1,predicted_post_input_work_j=1,predicted_work_change_j=1;
@@ -64,6 +65,17 @@ class ExperimentRunner {public:
 // METHOD_SOURCE
 using Event=PsramLogger::EnergyControlAutonomousZeroCrossEvent;
 int main(){
+ // The real dispatch records the old limit and bounded additional change.
+ {ExperimentRunner r;
+  r.wheel_cycle_guard_.peak(-1,5.3f,100,true);r.wheel_cycle_guard_.peak(1,5.4f,450,true);
+  r.wheel_cycle_guard_.peak(-1,5.51f,800,true);r.wheel_cycle_guard_.peak(1,5.23f,1150,true);
+  Event a;a.physical_next_peak_side=1;a.pre_input_wheel_speed_rpm=-270.f;
+  assert(r.tryTiltPriority(a,1200));
+  Event b;b.physical_next_peak_side=-1;b.pre_input_wheel_speed_rpm=14.f;
+  assert(r.tryTiltPriority(b,1500));
+  assert(b.output_executed && b.wheel_guard_trial_eligible && b.wheel_guard_extra_ms>0);
+  assert(b.wheel_guard_extra_ms<=5 && b.pulse_width_ms+b.wheel_guard_extra_ms==b.wheel_guard_legacy_ms);
+ }
  // No 1200mA foot-width trial interrupts the 4.5 degree startup stage.
  {ExperimentRunner r;Event e;assert(r.tryTiltPriority(e,500));
   assert(e.output_executed && e.pulse_width_ms==60 && e.foot_span_baseline_ms==0);

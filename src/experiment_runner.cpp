@@ -2983,7 +2983,14 @@ void ExperimentRunner::notifyPositiveLeftPeak(
     int8_t physical_side,uint32_t peak_ms,float amplitude_deg,
     const PsramLogger::EnergyControlAutonomousPeakEvent& event) {
   if(wheelWorkMode() && energy_control_autonomous_target_peak_deg_==8.f) {
-    if(imu_ && imu_->acquisitionHealthy() && !imu_->stale(millis()))
+    const bool healthy=imu_ && imu_->acquisitionHealthy() && !imu_->stale(millis());
+    const bool paired_time=energy_control_autonomous_pending_zero_ms_ &&
+        peak_ms>energy_control_autonomous_pending_zero_ms_ &&
+        peak_ms-energy_control_autonomous_pending_zero_ms_<=1500;
+    wheel_cycle_guard_.peak(physical_side,amplitude_deg,peak_ms,
+        healthy && paired_time && event.pending_command_matched &&
+        energy_control_autonomous_pending_mode_==peak_error_adaptation::Excite);
+    if(healthy)
       tilt_priority_.peak(physical_side,peak_ms,amplitude_deg);
     positive_left_boost_.peak(physical_side,peak_ms,amplitude_deg,
         imu_ && imu_->acquisitionHealthy() && !imu_->stale(millis()) &&
@@ -3534,6 +3541,7 @@ bool ExperimentRunner::tryTiltPriority(
       std::isfinite(event.zero_cross_abs_rate_dps) && event.zero_cross_abs_rate_dps>0.f &&
       event.pre_input_wheel_speed_valid && event.pre_input_wheel_speed_age_us<=50000 &&
       std::isfinite(event.pre_input_wheel_speed_rpm);
+  if(!in.hardware_healthy) wheel_cycle_guard_.reset();
   auto choice=tilt_priority_.propose(in);
   // Record every accepted healthy crossing, even when ordinary control is
   // selected. It will be paired with the corresponding measured peak.
@@ -3568,6 +3576,9 @@ bool ExperimentRunner::tryTiltPriority(
   const uint16_t before_wheel_guard=choice.width_ms;
   choice.width_ms=wheel_cycle_guard_.limit(in.next_side,event.pre_input_wheel_speed_rpm,
       in.hardware_healthy,t_test_ms,choice.width_ms);
+  event.wheel_guard_legacy_ms=wheel_cycle_guard_.legacyWidth();
+  event.wheel_guard_extra_ms=wheel_cycle_guard_.extraReduction();
+  event.wheel_guard_trial_eligible=wheel_cycle_guard_.trialEligible();
   if(in.next_side>0 && choice.width_ms!=before_wheel_guard) {
     // A truncated camera candidate is not the candidate that was requested.
     (void)foot_span_control_.selectorUnavailable(t_test_ms);
