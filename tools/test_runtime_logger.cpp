@@ -202,11 +202,25 @@ int main(int argc,char** argv){
       z.energy_model_extrapolated = z.energy_model_extrapolated || z.work_prediction_cross_condition;
       z.work_brake_cap_ms = z.work_control_branch==4 ? (z.work_prediction_cross_condition ? 30 : 25) : 0;
       z.work_bias_samples = z.physical_next_peak_side>0 ? 2 : z.work_control_branch==4 ? 3 : 0;
+      if(i==251) {
+        // Branch 15 records an accepted drive command, not measured motor current.
+        z.work_control_branch=15;z.energy_model_extrapolated=true;
+        z.work_prediction_cross_condition=true;z.valid=true;z.output_executed=true;
+        z.command_current_mA=1200;z.pulse_width_ms=60;
+        z.pulse_start_ms=25100;z.pulse_end_ms=25160;
+        z.startup_target_deg=4.5f;z.startup_positive_cap_ms=60;
+      }
       if(i>=252 && i<=254) {
         // Experimental branches must serialize with no fitted arrival model.
         z.work_control_branch=static_cast<uint8_t>(i-239);
         z.energy_model_extrapolated=true;
         z.work_prediction_cross_condition=true;
+      }
+      if(i==254) {
+        // The same branch also records a coast with no commanded output.
+        z.valid=true;z.output_executed=false;
+        z.command_current_mA=0;z.pulse_width_ms=0;
+        z.startup_target_deg=4.5f;z.startup_positive_cap_ms=60;
       }
       if(i==255) {
         z.work_control_branch=11;z.work_prediction_cross_condition=true;

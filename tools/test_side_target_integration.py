@@ -25,7 +25,7 @@ assert 'energyControlPeakTarget(physical_side)' in peak
 target=runner.split('float ExperimentRunner::energyControlPeakTarget(',1)[1].split('\n}',1)[0]
 assert 'physical_side == energy_control_autonomous_pending_next_side_' in target
 assert '? energy_control_autonomous_pending_target_deg_' in target
-assert ': energy_control_autonomous_target_peak_deg_' in target
+assert 'tilt_priority_.target()' in target
 assert 'state.target_deg=event.target_peak_deg;' in runner
 feedback=runner.split('void ExperimentRunner::observeWheelWorkPeak(',1)[1].split(
     '\nvoid ExperimentRunner::captureWheelWorkDecision(',1)[0]
@@ -50,7 +50,7 @@ struct Foot {float bias()const{return .2f;}float leftMean()const{return 2;}
 struct Low {float bias()const{return 0;}bool active()const{return false;}};
 struct Ramp {float value=8;float target()const{return value;}};
 class ExperimentRunner {public:
- Ramp gradual_start_;Foot foot_energy_;Low low_peak_feedback_;
+ Ramp gradual_start_,tilt_priority_;Foot foot_energy_;Low low_peak_feedback_;
  float controlPotential(float signed_deg)const{return signed_deg*signed_deg*.001f;}
  void applyFootEnergyTarget(PsramLogger::EnergyControlAutonomousZeroCrossEvent&,uint32_t);
 };
@@ -63,9 +63,9 @@ int main(){
  e.physical_next_peak_side=-1;r.applyFootEnergyTarget(e,100);
  assert(std::fabs(e.foot_balance_target_deg-8)<1e-6f);
  assert(std::fabs(e.target_energy_j-.064f)<1e-6f);
- r.gradual_start_.value=4.5f;e.physical_next_peak_side=1;r.applyFootEnergyTarget(e,100);
- assert(std::fabs(e.foot_balance_target_deg-8)<1e-6f);
- assert(std::fabs(e.target_energy_j-.064f)<1e-6f);
+ r.tilt_priority_.value=4.5f;e.physical_next_peak_side=1;r.applyFootEnergyTarget(e,100);
+ assert(std::fabs(e.foot_balance_target_deg-4.5f)<1e-6f);
+ assert(std::fabs(e.target_energy_j-.02025f)<1e-6f);
  std::cout<<"actual runner side target and energy wiring PASS\n";
 }
 '''

@@ -116,10 +116,14 @@ static Event trial(ExperimentRunner& r,uint32_t now,int expected_ma,uint16_t exp
   return e;
 }
 int main() {
-  {ExperimentRunner r;assert(r.energyControlPeakTarget(1)==8.f);
-   assert(r.energyControlPeakTarget(-1)==8.f);r.energy_control_autonomous_pending_peak_=true;
+  {ExperimentRunner r;assert(r.energyControlPeakTarget(1)==4.5f);
+   assert(r.energyControlPeakTarget(-1)==4.5f);r.energy_control_autonomous_pending_peak_=true;
    r.energy_control_autonomous_pending_next_side_=1;r.energy_control_autonomous_pending_target_deg_=9.f;
-   assert(r.energyControlPeakTarget(1)==9.f&&r.energyControlPeakTarget(-1)==8.f);}
+   assert(r.energyControlPeakTarget(1)==9.f&&r.energyControlPeakTarget(-1)==4.5f);
+   r.energy_control_autonomous_pending_target_deg_=NAN;
+   assert(r.energyControlPeakTarget(1)==4.5f);
+   r.energy_control_autonomous_pending_peak_=false;r.energy_control_autonomous_target_peak_deg_=6.f;
+   assert(r.energyControlPeakTarget(1)==6.f&&r.energyControlPeakTarget(-1)==6.f);}
   {ExperimentRunner r;seed(r);trial(r,2600,500,100);
    r.status_.pulse_active=false;Event no=sample(2600);assert(!r.tryPositiveLeftBoost(no,normal(),2600));
    r.feedPeak(1,2800,5.5f,true);r.feedPeak(-1,3200,4.8f,true);

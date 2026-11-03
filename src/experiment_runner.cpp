@@ -2953,7 +2953,8 @@ float ExperimentRunner::energyControlPeakTarget(int8_t physical_side) const {
   return energy_control_autonomous_pending_peak_ &&
       physical_side == energy_control_autonomous_pending_next_side_ && std::isfinite(energy_control_autonomous_pending_target_deg_)
       ? energy_control_autonomous_pending_target_deg_
-      : energy_control_autonomous_target_peak_deg_;
+      : (wheelWorkMode() && energy_control_autonomous_target_peak_deg_==8.f
+          ? tilt_priority_.target() : energy_control_autonomous_target_peak_deg_);
 }
 void ExperimentRunner::notifyPositiveLeftPeak(
     int8_t physical_side,uint32_t peak_ms,float amplitude_deg,
@@ -3497,7 +3498,8 @@ bool ExperimentRunner::tryTiltPriority(
     PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,uint32_t t_test_ms) {
   tilt_priority::Input in;
   in.now_ms=t_test_ms;in.preset_deg=event.target_peak_deg;
-  in.target_deg=event.target_peak_deg;in.next_side=event.physical_next_peak_side;
+  in.target_deg=tilt_priority_.target();in.next_side=event.physical_next_peak_side;
+  in.crossing_rate_dps=event.zero_cross_abs_rate_dps;
   in.hardware_cap_ms=Config::WALKING_TARGET8_MAX_PULSE_MS;
   in.hardware_healthy=wheelWorkMode() && !status_.emergency_stop &&
       status_.state==ExperimentState::RUNNING_BATCH_SWEEP && !status_.pulse_active &&
@@ -3523,33 +3525,40 @@ bool ExperimentRunner::tryTiltPriority(
   event.predicted_next_peak_amplitude_deg=NAN;event.predicted_observed_next_peak_deg=NAN;
   event.predicted_wheel_work_j=NAN;event.predicted_input_work_j=NAN;
   event.predicted_post_input_work_j=NAN;event.predicted_work_change_j=NAN;
-  event.q_command_mA_s=NAN;event.q_effective_pred_mA_s=NAN;
+  event.q_command_mA_s=choice.coast ? 0.f : NAN;event.q_effective_pred_mA_s=NAN;
   event.predicted_current_goal_mA=NAN;event.predicted_current_rise_tau_s=NAN;
   event.aligned_initial_current_mA=NAN;
   status_.current_audit_q_target_mA_s=NAN;status_.current_audit_q_pred_mA_s=NAN;
-  event.q_command_direction=choice.direction;event.command_matches_zero_cross_motion=true;
+  event.q_command_direction=choice.coast ? 0 : choice.direction;
+  event.command_matches_zero_cross_motion=!choice.coast;
   event.command_current_mA=choice.current_ma;event.pulse_width_ms=choice.width_ms;
-  event.pulse_start_ms=t_test_ms;event.pulse_end_ms=t_test_ms+choice.width_ms;
+  event.pulse_start_ms=choice.coast ? 0 : t_test_ms;
+  event.pulse_end_ms=choice.coast ? 0 : t_test_ms+choice.width_ms;
   event.valid=false;event.output_executed=false;
-  if(!beginEnergyControlAutonomousPulse(run_start_ms_+t_test_ms,t_test_ms,
+  if(!choice.coast && !beginEnergyControlAutonomousPulse(run_start_ms_+t_test_ms,t_test_ms,
                                         choice.direction,choice.width_ms,choice.current_ma)) {
+    tilt_priority_.confirm(in.next_side,t_test_ms,choice,false);
     event.command_current_mA=0;event.pulse_width_ms=0;
+    event.q_command_direction=0;event.command_matches_zero_cross_motion=false;
     event.pulse_start_ms=0;event.pulse_end_ms=0;
     event.reason=Config::ENERGY_CONTROL_AUTONOMOUS_REASON_CURRENT_WRITE_FAILED;
     return true;
   }
-  event.valid=true;event.output_executed=true;event.reason=Config::ENERGY_CONTROL_AUTONOMOUS_REASON_NONE;
+  tilt_priority_.confirm(in.next_side,t_test_ms,choice,true);
+  event.valid=true;event.output_executed=!choice.coast;
+  event.reason=choice.coast ? Config::ENERGY_CONTROL_AUTONOMOUS_REASON_VALID_NO_OUTPUT
+                            : Config::ENERGY_CONTROL_AUTONOMOUS_REASON_NONE;
   pending_cg_shift_mm_=run_cg_shift_mm_;pending_target_energy_j_=event.target_energy_j;
   energy_control_autonomous_pending_peak_=true;energy_control_autonomous_pending_probe_=true;
-  energy_control_autonomous_pending_next_side_=choice.direction;
-  energy_control_autonomous_pending_target_deg_=event.target_peak_deg;
-  energy_control_autonomous_pending_q_command_mA_s_=NAN;
+  energy_control_autonomous_pending_next_side_=in.next_side;
+  energy_control_autonomous_pending_target_deg_=choice.target_deg;
+  energy_control_autonomous_pending_q_command_mA_s_=choice.coast ? 0.f : NAN;
   energy_control_autonomous_pending_model_energy_j_=NAN;
   energy_control_autonomous_pending_wheel_rpm_=event.pre_input_wheel_speed_rpm;
   energy_control_autonomous_pending_wheel_age_us_=event.pre_input_wheel_speed_age_us;
   energy_control_autonomous_pending_wheel_valid_=event.pre_input_wheel_speed_valid;
   energy_control_autonomous_pending_zero_ms_=event.zero_cross_time_ms;
-  energy_control_autonomous_pending_mode_=peak_error_adaptation::Excite;
+  energy_control_autonomous_pending_mode_=choice.coast ? peak_error_adaptation::Coast : peak_error_adaptation::Excite;
   energy_control_autonomous_pending_saturated_upper_=false;
   energy_control_autonomous_pending_saturated_lower_=false;
   work_positive_pending_=false;work_negative_pending_=false;
@@ -3842,7 +3851,7 @@ bool ExperimentRunner::tryPositiveLeftBoost(
 void ExperimentRunner::applyFootEnergyTarget(PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,uint32_t t_ms) {
   (void)t_ms;
   const int side=event.physical_next_peak_side;
-  const float side_target=event.target_peak_deg;
+  const float side_target=tilt_priority_.target();
   const float base=controlPotential(side*side_target);
   event.target_energy_j=base; // phase cap owns 8-degree foot balancing
   event.foot_balance_target_deg=side_target;
@@ -4055,8 +4064,8 @@ void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(uint32_t t_test_
   event.cg_shift_mm=wheelWorkMode() ? run_cg_shift_mm_ : 0.f;
   event.target_energy_j = wheelWorkMode() ? controlPotential(event.physical_next_peak_side * event.target_peak_deg) : lateral_target_energy_j_;
   if(wheelWorkMode() && event.target_peak_deg==8.f) {
-    event.startup_target_deg=gradual_start_.target();
-    event.startup_positive_cap_ms=gradual_start_.positiveCapMs();
+    event.startup_target_deg=tilt_priority_.target();
+    event.startup_positive_cap_ms=tilt_priority_.widthLimit(event.physical_next_peak_side);
     event.foot_balance_left_mean=foot_balance_.leftMean();
     event.foot_balance_right_mean=foot_balance_.rightMean();
     if(foot_frame_run_id_==status_.run_id && t_test_ms>=foot_frame_ms_ && t_test_ms-foot_frame_ms_<=150) {

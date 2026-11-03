@@ -2,101 +2,160 @@
 #include <cmath>
 #include <cstdint>
 
-// Experimental symmetric tilt excitation for the 8 degree walking preset.
-// An accepted command is not a measured current, an energy prediction, or a
-// guarantee of the next peak. The mapping between +/- pitch and the robot's
-// physical left/right is not assumed. Existing IMU, actuator and emergency
-// protections remain the runner's responsibility.
+// Experimental, observation-driven startup. The first isolated peak is not a
+// completed walking cycle. Neither the requested current nor a peak comparison
+// is proof of torque, ground stride, contact, or physical left/right mapping.
+// Sensor, actuator, attitude and emergency protections belong to the runner.
 namespace tilt_priority {
 struct Input {
   uint32_t now_ms=0;
   float preset_deg=NAN;
   float target_deg=NAN;
+  // Absolute angular rate at the detected crossing, before this input. This
+  // does not measure subsequent acceleration or the speed of either foot.
+  float crossing_rate_dps=NAN;
   int8_t next_side=0;
   uint16_t hardware_cap_ms=0;
   bool hardware_healthy=false;
 };
 struct Choice {
-  bool selected=false;
+  bool selected=false,coast=false;
   int16_t current_ma=0;
   uint16_t width_ms=0;
   int8_t direction=0;
+  float target_deg=NAN;
 };
 
 class Controller {
  public:
-  void reset() { *this=Controller{}; }
+  void reset() {*this=Controller{};}
+  float target()const{return target_deg_;}
+  uint16_t widthLimit(int side)const{return history_[index(side)].width_ms;}
 
-  // Record every accepted crossing, including normal/coasting half-cycles.
-  // Times are run-relative, in the same clock domain as the confirmed peaks.
+  // The crossing and its accepted result have run-relative timestamps. A
+  // result is usable only after confirm and a subsequently paired peak.
   void crossing(int8_t side,uint32_t ms) {
-    if((side!=1 && side!=-1) || !ms)return;
-    auto& h=history_[index(side)];
-    h.cross_ms=ms;
+    if((side!=1 && side!=-1)||!ms)return;
+    History& h=history_[index(side)];h.cross_ms=ms;h.confirmed=false;
+  }
+  void confirm(int8_t side,uint32_t ms,const Choice& choice,bool executed) {
+    if((side!=1 && side!=-1)||!ms)return;
+    History& h=history_[index(side)];
+    h.confirmed=executed && choice.selected && choice.direction==side &&
+      h.cross_ms==ms && std::isfinite(choice.target_deg) &&
+      (choice.coast ? choice.width_ms==0 && choice.current_ma==0 :
+        choice.width_ms>0 && choice.current_ma==1200);
+    if(h.confirmed){h.command_ms=choice.width_ms;h.was_drive=!choice.coast;h.command_target=choice.target_deg;}
   }
 
-  // A peak is used only after its own side's confirmed zero crossing. Its
-  // elapsed time is historical evidence, not a prediction for the next
-  // stronger pulse. Overdue, missing and out-of-order pairs are not used.
-  void peak(int8_t side,uint32_t ms,float angle) {
-    if((side!=1 && side!=-1) || !ms || !std::isfinite(angle) || angle<0.f)return;
-    auto& h=history_[index(side)];
+  __attribute__((noinline)) void peak(int8_t side,uint32_t ms,float angle) {
+    if((side!=1 && side!=-1)||!ms||!std::isfinite(angle)||angle<0.f)return;
+    History& h=history_[index(side)];
     if(h.peak_ms && ms<=h.peak_ms)return;
+    const bool paired=h.confirmed && h.cross_ms && ms>h.cross_ms &&
+      ms-h.cross_ms<=1500 && (!h.was_drive || ms-h.cross_ms>=h.command_ms);
+    if(initial_peak_seen_ && paired && last_pair_side_==side)clearPair();
     h.peak_deg=angle;h.peak_ms=ms;
-    if(h.cross_ms && ms>h.cross_ms && ms-h.cross_ms<=600) {
-      h.elapsed_ms=static_cast<uint16_t>(ms-h.cross_ms);
-      h.paired_ms=ms;
-    } else {
-      h.elapsed_ms=0;h.paired_ms=0;
+    if(paired && ms-h.cross_ms<=600){h.elapsed_ms=static_cast<uint16_t>(ms-h.cross_ms);h.paired_ms=ms;}
+    else {h.elapsed_ms=0;h.paired_ms=0;}
+    // Preserve evidence only for an actually sent, time-matched drive. It is
+    // applied after both halves of the same completed cycle are observed.
+    h.evidence=0;
+    if(initial_peak_seen_ && paired && h.was_drive && std::isfinite(h.command_target)) {
+      if(angle>h.command_target+1.5f)h.evidence=2;
+      else if(angle<h.command_target-.5f && h.command_ms==h.width_ms)h.evidence=1;
+      else h.evidence=3;
     }
-    h.cross_ms=0;
+    h.confirmed=false;h.cross_ms=0;
+    if(!initial_peak_seen_) {initial_peak_seen_=true;return;}
+    // A first, isolated peak never forms half of an established cycle. Only
+    // paired post-start peaks from two alternating sides can advance a stage.
+    if(!paired) {clearPair();return;}
+    last_pair_side_=side;
+    const unsigned bit=side>0?2u:1u;
+    pair_mask_|=bit;
+    // A consistently weak but valid oscillation must not trap startup below
+    // the requested goal. Raise the stage after two complete observed cycles
+    // even if the measured peak is low; a large overshoot holds the stage.
+    if(angle>target_deg_+1.5f)pair_good_=false;
+    if(pair_mask_==3u) {
+      updateWidth(history_[0]);updateWidth(history_[1]);
+      if(pair_good_)++good_pairs_;else good_pairs_=0;
+      if(good_pairs_>=2) {target_deg_=std::fmin(8.f,target_deg_+.5f);good_pairs_=0;}
+      pair_mask_=0;pair_good_=true;
+    }
   }
 
   __attribute__((noinline)) Choice propose(const Input& in) const {
     Choice out;
     if(in.preset_deg!=8.f || !in.hardware_healthy ||
-       (in.next_side!=1 && in.next_side!=-1) ||
-       !std::isfinite(in.target_deg) || in.target_deg<=0.f ||
-       !in.now_ms || !in.hardware_cap_ms)return out;
-    const auto& h=history_[index(in.next_side)];
-    const bool fresh=h.peak_ms && in.now_ms>=h.peak_ms &&
-        in.now_ms-h.peak_ms<=1500 && std::isfinite(h.peak_deg);
-    const float deficit=fresh ? in.target_deg-h.peak_deg : NAN;
-    // Hand the choice back to the normal controller near/above the target.
-    if(fresh && deficit<=.5f)return out;
-
+       (in.next_side!=1 && in.next_side!=-1) || !std::isfinite(in.target_deg) ||
+       in.target_deg<=0.f || !std::isfinite(in.crossing_rate_dps) ||
+       in.crossing_rate_dps<=0.f || !in.now_ms || !in.hardware_cap_ms)return out;
+    const History& h=history_[index(in.next_side)];
+    const History& opposite=history_[index(-in.next_side)];
+    if((h.peak_ms && in.now_ms<h.peak_ms) ||
+       (opposite.peak_ms && in.now_ms<opposite.peak_ms))return out;
+    const bool fresh=h.peak_ms && in.now_ms>=h.peak_ms && in.now_ms-h.peak_ms<=1500 && std::isfinite(h.peak_deg);
+    const bool opposite_fresh=opposite.peak_ms && in.now_ms>=opposite.peak_ms &&
+        in.now_ms-opposite.peak_ms<=1500 && std::isfinite(opposite.peak_deg);
+    // Once startup has a peak, a missing/stale preceding opposite observation
+    // cannot justify a new experimental pulse. Return to ordinary control.
+    if(initial_peak_seen_ && !opposite_fresh)return out;
+    const float target=std::fmin(in.target_deg,target_deg_);
+    out.target_deg=target;out.direction=in.next_side;
+    // Trial heuristic, not an identified energy or foot-speed limit. A fast
+    // body crossing may already have momentum to swing the foot. Rate alone
+    // reduces pulse width, but does not force coast or command a stop.
+    const float low_rate=target*4.f, high_rate=target*12.f;
+    // A large incoming opposite peak can carry considerable energy to the
+    // next side. Do not add another full input merely because the earlier
+    // same-side peak was a small startup half step. This is not a stop.
+    if((opposite_fresh && opposite.peak_deg>target+1.5f) || (fresh && h.peak_deg>target+1.5f)) {
+      out.selected=true;out.coast=true;return out;
+    }
     uint16_t cap=in.hardware_cap_ms<150 ? in.hardware_cap_ms : 150;
-    const bool timing_fresh=fresh && h.paired_ms==h.peak_ms && h.elapsed_ms;
-    if(timing_fresh) {
-      if(h.elapsed_ms<=30)return out;
-      const uint16_t timing_cap=static_cast<uint16_t>(h.elapsed_ms-30);
-      if(cap>timing_cap)cap=timing_cap;
-    } else if(cap>100) {
-      cap=100;
+    if(h.width_ms<cap)cap=h.width_ms;
+    if(fresh && h.paired_ms==h.peak_ms && h.elapsed_ms) {
+      // The previous timing is evidence, not a guarantee about a new pulse.
+      if(h.elapsed_ms<=30) {out.selected=true;out.coast=true;return out;}
+      if(cap>h.elapsed_ms-30)cap=static_cast<uint16_t>(h.elapsed_ms-30);
     }
-    if(!cap)return out;
-
-    // When the measured side is already approaching its target, reduce
-    // duration continuously rather than repeatedly applying the longest
-    // pulse. Wide deficits deliberately use the available full duration.
-    uint16_t width=cap;
-    if(fresh && deficit<2.f && cap>70) {
-      const float fraction=(deficit-.5f)/1.5f;
-      const float scaled=70.f+(static_cast<float>(cap)-70.f)*fraction;
-      width=static_cast<uint16_t>(std::floor(scaled+.5f));
-      if(width>cap)width=cap;
+    if(in.crossing_rate_dps>low_rate && cap>20) {
+      const float fraction=std::fmax(0.f,(high_rate-in.crossing_rate_dps)/(high_rate-low_rate));
+      cap=static_cast<uint16_t>(20.f+(cap-20)*fraction);
     }
-    out.selected=true;out.current_ma=1200;out.width_ms=width;out.direction=in.next_side;
-    return out;
+    if(!cap)return Choice{};
+    out.selected=true;out.current_ma=1200;out.width_ms=cap;return out;
   }
 
  private:
   struct History {
-    float peak_deg=NAN;
+    float peak_deg=NAN,command_target=NAN;
     uint32_t peak_ms=0,cross_ms=0,paired_ms=0;
-    uint16_t elapsed_ms=0;
+    uint16_t elapsed_ms=0,command_ms=0,width_ms=60;
+    uint8_t under_count=0,evidence=0;
+    bool confirmed=false,was_drive=false;
   };
-  static unsigned index(int8_t side) {return side>0 ? 1u : 0u;}
+  static unsigned index(int side){return side>0?1u:0u;}
+  void clearPair(){pair_mask_=0;good_pairs_=0;pair_good_=true;history_[0].evidence=history_[1].evidence=0;}
+  static void updateWidth(History& h) {
+    if(h.evidence==2) {
+      h.under_count=0;
+      const uint16_t used=h.command_ms<h.width_ms ? h.command_ms : h.width_ms;
+      h.width_ms=used>30 ? static_cast<uint16_t>(used-10) : 20;
+    } else if(h.evidence==1) {
+      if(++h.under_count>=2) {
+        h.under_count=0;
+        h.width_ms=h.width_ms<140 ? static_cast<uint16_t>(h.width_ms+10) : 150;
+      }
+    } else if(h.evidence==3)h.under_count=0;
+    h.evidence=0;
+  }
   History history_[2];
+  float target_deg_=4.5f;
+  uint8_t pair_mask_=0,good_pairs_=0;
+  int8_t last_pair_side_=0;
+  bool initial_peak_seen_=false,pair_good_=true;
 };
 }

@@ -15,10 +15,15 @@ assert runner.count(start)==1 and runner.count(end)==1
 method=start+runner.split(start,1)[1].split(end,1)[0]
 at_zero=runner.split('void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(',1)[1]
 assert at_zero.index('tryTiltPriority(event,t_test_ms)') < at_zero.index('work_choice=chooseWheelWork(')
+branch=at_zero.split('if(work_mode && event.target_peak_deg==8.f && tryTiltPriority(event,t_test_ms)) {',1)[1].split('}',1)[0]
+assert 'if(!event.output_executed)rearm_for_next_peak();' in branch and 'return;' in branch
 assert 'energy_control_autonomous_pending_probe_=true' in method
 assert 'energy_control_autonomous_pending_model_energy_j_=NAN' in method
 assert 'event.work_control_branch=15' in method
 assert 'tilt_priority_.crossing(in.next_side,t_test_ms)' in method
+assert 'in.crossing_rate_dps=event.zero_cross_abs_rate_dps' in method
+assert 'event.zero_cross_abs_rate_dps = fabsf(rate_dps)' in at_zero
+assert 'imu_->acquisitionHealthy() && !imu_->stale(millis())' in method
 assert 'tilt_priority_.peak(physical_side,peak_ms,amplitude_deg)' in runner
 assert 'std::fabs(event.pre_input_wheel_speed_rpm)' not in method
 assert fixture.count('// METHOD_SOURCE')==1

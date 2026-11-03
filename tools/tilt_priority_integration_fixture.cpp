@@ -8,13 +8,14 @@ namespace Config {
 constexpr uint16_t WALKING_TARGET8_MAX_PULSE_MS=150;
 constexpr uint8_t ENERGY_CONTROL_AUTONOMOUS_REASON_CURRENT_WRITE_FAILED=12;
 constexpr uint8_t ENERGY_CONTROL_AUTONOMOUS_REASON_NONE=0;
+constexpr uint8_t ENERGY_CONTROL_AUTONOMOUS_REASON_VALID_NO_OUTPUT=1;
 }
 enum class ExperimentState { RUNNING_BATCH_SWEEP, STOPPED };
 uint32_t millis(){return 10000;}
 namespace PsramLogger {
 struct EnergyControlAutonomousZeroCrossEvent {
  uint32_t zero_cross_time_ms=999;int8_t physical_next_peak_side=1,q_command_direction=0;
- float target_peak_deg=8,pre_input_wheel_speed_rpm=20,target_energy_j=.001f,zero_cross_abs_rate_dps=30;
+ float target_peak_deg=8,pre_input_wheel_speed_rpm=20,target_energy_j=.001f,zero_cross_abs_rate_dps=10;
  uint16_t vbat_mV=7500;bool pre_input_wheel_speed_valid=true;uint32_t pre_input_wheel_speed_age_us=100;
  bool side_mismatch_diagnostic=false,energy_model_extrapolated=false,work_prediction_cross_condition=false;
  uint8_t work_control_branch=0,reason=0;uint16_t work_brake_cap_ms=0,solver_selected_integer_width_ms=0;
@@ -56,27 +57,62 @@ class ExperimentRunner {public:
 // METHOD_SOURCE
 using Event=PsramLogger::EnergyControlAutonomousZeroCrossEvent;
 int main(){
- {ExperimentRunner r;Event e;assert(r.tryTiltPriority(e,1000));
+ // Replay the measured startup peaks and crossings from run 302. The new
+ // output widths are not a prediction of the resulting physical peaks.
+ {ExperimentRunner r;r.tilt_priority_.peak(1,220,2.21185f);
+  Event e;e.physical_next_peak_side=-1;e.zero_cross_time_ms=414;e.zero_cross_abs_rate_dps=18.645f;
+  assert(r.tryTiltPriority(e,416));
   assert(e.valid&&e.output_executed&&e.work_control_branch==15);
-  assert(r.sign==1&&r.ma==1200&&r.width==100&&e.pulse_end_ms==1100);
-  assert(std::isnan(e.q_command_mA_s)&&std::isnan(e.predicted_energy_j));
-  assert(r.energy_control_autonomous_pending_probe_&&r.energy_control_autonomous_pending_next_side_==1);
+  assert(r.sign==-1&&r.ma==1200&&r.width==59&&e.pulse_end_ms==475);
+  assert(r.energy_control_autonomous_pending_probe_&&r.energy_control_autonomous_pending_next_side_==-1);
+  assert(r.energy_control_autonomous_pending_target_deg_==4.5f);
   assert(std::isnan(r.energy_control_autonomous_pending_model_energy_j_));
   assert(!r.work_positive_pending_&&!r.work_negative_pending_&&r.adaptive_cg_.broken);
-  r.tilt_priority_.peak(1,1190,5);Event e2;assert(r.tryTiltPriority(e2,1800));
-  assert(e2.pulse_width_ms==150&&e2.command_current_mA==1200);
-  r.tilt_priority_.peak(1,1975,7.8f);Event e3;assert(!r.tryTiltPriority(e3,2600));
-  assert(r.calls==2);}
- {ExperimentRunner r;Event e;e.physical_next_peak_side=-1;assert(r.tryTiltPriority(e,1000));
-  assert(r.sign==-1&&r.ma==1200&&e.q_command_direction==-1);}
+  r.tilt_priority_.peak(-1,641,6.57367f);
+  Event e2;e2.zero_cross_time_ms=865;e2.zero_cross_abs_rate_dps=36.6997f;assert(r.tryTiltPriority(e2,867));
+  assert(e2.valid&&!e2.output_executed&&e2.reason==1&&r.calls==1);
+  assert(e2.command_current_mA==0&&e2.pulse_width_ms==0&&e2.pulse_start_ms==0);
+  assert(e2.q_command_direction==0&&e2.q_command_mA_s==0);
+  assert(r.energy_control_autonomous_pending_peak_&&r.energy_control_autonomous_pending_probe_);
+  assert(r.energy_control_autonomous_pending_mode_==peak_error_adaptation::Coast);
+  // Synthetic later peaks test that coast remains in control and output can
+  // resume after the old large peak has been replaced by low measurements.
+  r.tilt_priority_.peak(1,1098,3.8f);
+  Event e3;e3.physical_next_peak_side=-1;assert(r.tryTiltPriority(e3,1300));
+  assert(e3.valid&&!e3.output_executed&&r.calls==1);
+  r.tilt_priority_.peak(-1,1500,3.5f);
+  Event e4;assert(r.tryTiltPriority(e4,1700));
+  assert(e4.output_executed&&r.calls==2&&e4.command_current_mA==1200);
+ }
  {ExperimentRunner r;Event e;r.begin_ok=false;assert(r.tryTiltPriority(e,1000));
   assert(!e.valid&&!e.output_executed&&e.pulse_width_ms==0&&e.reason==12);
-  assert(!r.energy_control_autonomous_pending_peak_);}
+  assert(!r.energy_control_autonomous_pending_peak_);
+  r.tilt_priority_.peak(1,1190,1.f);
+  assert(r.tilt_priority_.widthLimit(1)==60);}
+ // Run 803's recorded 1858 ms crossing and immediately prior peak,
+ // evaluated as an isolated hypothetical decision at the initial stage.
+ {ExperimentRunner r;r.tilt_priority_.peak(1,1698,4.67317f);
+  Event e;e.zero_cross_time_ms=1858;e.physical_next_peak_side=-1;e.zero_cross_abs_rate_dps=41.0152f;
+  assert(r.tryTiltPriority(e,1860));
+  assert(e.valid&&e.output_executed&&e.pulse_width_ms==34&&r.sign==-1);}
+ // Signed direction remains determined by the crossing side; the rate is
+ // the positive interpolated magnitude, for both signs.
+ {ExperimentRunner slow,medium,fast,negative;Event a,b,c,d;
+  a.zero_cross_abs_rate_dps=15;b.zero_cross_abs_rate_dps=30;c.zero_cross_abs_rate_dps=60;
+  d.zero_cross_abs_rate_dps=30;d.physical_next_peak_side=-1;
+  assert(slow.tryTiltPriority(a,1000)&&medium.tryTiltPriority(b,1000));
+  assert(fast.tryTiltPriority(c,1000)&&negative.tryTiltPriority(d,1000));
+  assert(a.pulse_width_ms==60&&b.pulse_width_ms<60&&b.pulse_width_ms>20);
+  assert(c.valid&&c.output_executed&&c.pulse_width_ms==20&&fast.calls==1);
+  assert(d.pulse_width_ms==b.pulse_width_ms&&negative.sign==-1);
+ }
+ {ExperimentRunner r;Event e;e.zero_cross_abs_rate_dps=NAN;assert(!r.tryTiltPriority(e,1000)&&r.calls==0);}
+ {ExperimentRunner r;Event e;e.zero_cross_abs_rate_dps=0;assert(!r.tryTiltPriority(e,1000)&&r.calls==0);}
  {ExperimentRunner r;Event e;r.status_.emergency_stop=true;assert(!r.tryTiltPriority(e,1000)&&r.calls==0);}
  {ExperimentRunner r;Event e;r.imu_obj.good=false;assert(!r.tryTiltPriority(e,1000)&&r.calls==0);}
  {ExperimentRunner r;Event e;e.pre_input_wheel_speed_age_us=999999;assert(!r.tryTiltPriority(e,1000)&&r.calls==0);}
  {ExperimentRunner r;Event e;e.pre_input_wheel_speed_rpm=1200.f;assert(r.tryTiltPriority(e,1000));
   assert(e.valid&&e.output_executed&&r.ma==1200);}
  {ExperimentRunner r;Event e;e.target_peak_deg=10;assert(!r.tryTiltPriority(e,1000)&&r.calls==0);}
- std::cout<<"actual runner tilt priority, symmetric output and interlocks PASS\n";
+ std::cout<<"actual runner staged output, coast recovery and sensor guards PASS\n";
 }

@@ -61,7 +61,7 @@ header = converter.parse_header(data)
 metadata = converter.expand_tables(json.loads(data[110:110+header['metadata_json_size']], parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value))))
 assert metadata['metadata_json_final_bytes'] == header['metadata_json_size']
 assert not metadata['metadata_event_detail_truncated']
-assert metadata['firmware_revision']=='1.0.73-tilt-priority'
+assert metadata['firmware_revision']=='1.0.74-gradual-sway'
 for manifest in ('site/manifest.json','site/manifest-freefoot-runtime-v2.json'):
     cfg=json.loads(Path(manifest).read_text())
     assert cfg['version']==metadata['firmware_revision']
@@ -274,7 +274,16 @@ for work_first, suffix in ((False, '.fallback-first.rwlog'), (True, '.work-first
     assert work_metadata['wheel_work_positive_current_candidates_mA'] == [300,350,400]
     assert work_metadata['tilt_priority']['branch'] == 15
     assert work_metadata['tilt_priority']['command_mA'] == 1200
+    assert work_metadata['tilt_priority']['initial_target_deg'] == 4.5
+    assert work_metadata['tilt_priority']['final_target_deg'] == 8
+    assert work_metadata['tilt_priority']['target_step_deg'] == 0.5
+    assert work_metadata['tilt_priority']['initial_width_ms'] == 60
     assert work_metadata['tilt_priority']['max_width_ms'] == 150
+    speed_guard = work_metadata['tilt_priority']['speed_guard']
+    assert speed_guard['signal'] == 'zero_cross_abs_rate_dps'
+    assert speed_guard['full_width_rate_per_target_deg'] == 4
+    assert speed_guard['taper_full_rate_per_target_deg'] == 12
+    assert speed_guard['taper_endpoint_ms'] == 20
     assert work_metadata['tilt_priority']['hardware_validated'] is False
     assert work_metadata['metadata_json_final_bytes'] == work_header['metadata_json_size']
     assert not work_metadata['metadata_event_detail_truncated']
@@ -285,7 +294,7 @@ for work_first, suffix in ((False, '.fallback-first.rwlog'), (True, '.work-first
         assert abs(event['cg_shift_mm']-(.35 if index%2 else -.15))<1e-6
         assert event['work_model_weight'] == (.75 if index%2 else 1)
         walking = index == 255
-        experimental = index in (252,253,254)
+        experimental = index in (251,252,253,254)
         fallback = not walking and not experimental and ((index % 3 == 0) != work_first)
         cross_condition = walking or experimental or (not fallback and index % 4 == 1)
         if index % 2 == 0:
@@ -294,9 +303,18 @@ for work_first, suffix in ((False, '.fallback-first.rwlog'), (True, '.work-first
         assert event['energy_model_extrapolated'] == (fallback or cross_condition)
         assert event['work_prediction_cross_condition'] == cross_condition
         if experimental:
-            expected = ('weak_side_assist_v1_unmodeled', 'positive_asymmetry_unmodeled_trial',
-                        'symmetric_tilt_priority_unmodeled_trial')[index-252]
-            assert event['work_control_branch'] == index-239
+            expected = {251:'gradual_sway_unmodeled_trial_or_coast',
+                        252:'weak_side_assist_v1_unmodeled',
+                        253:'positive_asymmetry_unmodeled_trial',
+                        254:'gradual_sway_unmodeled_trial_or_coast'}[index]
+            assert event['work_control_branch'] == (15 if index == 251 else index-239)
+            if index in (251,254):
+                assert event['valid'] is True
+                assert event['output_executed'] is (index == 251)
+                assert event['command_current_mA'] == (1200 if index == 251 else 0)
+                assert event['pulse_width_ms'] == (60 if index == 251 else 0)
+                assert event['startup_target_deg'] == 4.5
+                assert event['startup_positive_cap_ms'] == 60
             assert event['arrival_energy_model_revision'] is None
             assert event['free_model_revision'] == expected
         elif fallback:
@@ -353,6 +371,9 @@ for work_first, suffix in ((False, '.fallback-first.rwlog'), (True, '.work-first
                     assert abs(float(row[key])-event[key])<.00001
                 for key in ('foot_span_start_ms','foot_span_end_ms','foot_span_baseline_ms','foot_span_requested_ms','foot_span_state','foot_span_accepted_cycles'):
                     assert row[key]==str(event[key])
+            if index in (251,254):
+                for key in ('valid','output_executed','command_current_mA','pulse_width_ms'):
+                    assert row[key] == str(event[key])
             for key in ('work_control_branch', 'work_brake_cap_ms', 'work_bias_samples', 'cg_shift_mm', 'work_model_weight'):
                 assert row[key] == str(event[key])
             assert row['work_prediction_cross_condition'] == str(event['work_prediction_cross_condition'])
