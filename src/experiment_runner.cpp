@@ -2546,6 +2546,7 @@ void ExperimentRunner::resetEnergyControlAutonomous() {
   positive_left_boost_.reset();positive_left_input_=positive_left_boost::Input{};tilt_priority_.reset();span_observer_sequence_=0;
   span_positive_decision_next_=0;
   for (auto& x:span_positive_decisions_) x=SpanPositiveDecision{};
+  for (auto& x:span_positive_context_) x=SpanPositiveContext{};
   phase_negative_peak_next_=phase_negative_decision_next_=0;
   for (auto& x:phase_negative_peaks_) x=PhaseNegativePeak{};
   for (auto& x:phase_negative_decisions_) x=PhaseNegativeDecision{};
@@ -2911,10 +2912,14 @@ void ExperimentRunner::processFootSpanCycle() {
   const PhaseNegativePeak* peak=nullptr;
   const PhaseNegativeDecision* negative=nullptr;
   const SpanPositiveDecision* positive=nullptr;
+  const SpanPositiveContext* positive_context=nullptr;
   unsigned negatives=0,positives=0;
   for(const auto& p:phase_negative_peaks_) if(p.ms && p.ms==span.end_ms)peak=&p;
   for(const auto& d:phase_negative_decisions_) if(d.ms>span.start_ms && d.ms<span.end_ms) {negative=&d;++negatives;}
-  for(const auto& d:span_positive_decisions_) if(d.ms>span.start_ms && d.ms<span.end_ms) {positive=&d;++positives;}
+  for(unsigned i=0;i<8;++i) {
+    const auto& d=span_positive_decisions_[i];
+    if(d.ms>span.start_ms && d.ms<span.end_ms) {positive=&d;positive_context=&span_positive_context_[i];++positives;}
+  }
   foot_span_control::Cycle cycle;
   cycle.start_ms=span.start_ms;cycle.end_ms=span.end_ms;
   cycle.left=span.left.trimmed_span;cycle.right=span.right.trimmed_span;
@@ -2940,7 +2945,8 @@ void ExperimentRunner::processFootSpanCycle() {
     cycle.positive_ms=positive->ms;cycle.positive_width=positive->width;
     cycle.positive_ma=positive->ma;cycle.positive_sign=positive->sign;
     cycle.positive_executed=positive->executed;cycle.target_mj=positive->target_mj;
-    cycle.positive_rate_dps=positive->rate_dps;cycle.positive_rpm=positive->rpm;
+    cycle.positive_rate_dps=positive_context ? positive_context->rate_dps : NAN;
+    cycle.positive_rpm=positive_context ? positive_context->rpm : NAN;
   }
   // A small, consistently detected foot is still a measurement, not an
   // absent foot. Require a reversal for larger motion so a monotonic drift
@@ -3955,10 +3961,11 @@ void ExperimentRunner::finishFootEnergyDecision(PsramLogger::EnergyControlAutono
         positive_left_boost_.confirmNormal(positive_left_input_,event.command_current_mA,
             event.pulse_width_ms,event.q_command_direction,event.valid && event.output_executed);
       auto& d=span_positive_decisions_[span_positive_decision_next_];
+      auto& context=span_positive_context_[span_positive_decision_next_];
       d.ms=t_ms;d.width=event.pulse_width_ms;d.ma=event.command_current_mA;
       d.sign=event.q_command_direction;d.target_mj=event.target_energy_j*1000.f;
-      d.rate_dps=event.zero_cross_abs_rate_dps;
-      d.rpm=event.pre_input_wheel_speed_valid && event.pre_input_wheel_speed_age_us<=50000
+      context.rate_dps=event.zero_cross_abs_rate_dps;
+      context.rpm=event.pre_input_wheel_speed_valid && event.pre_input_wheel_speed_age_us<=50000
           ? event.pre_input_wheel_speed_rpm : NAN;
       d.executed=event.output_executed;
       span_positive_decision_next_=(span_positive_decision_next_+1)%8;
