@@ -807,7 +807,7 @@ private:
   Adafruit_Madgwick filter_dynamic_raw_[Config::DYNAMIC_BETA_COUNT];
   Adafruit_Madgwick filter_beta1_bias_;
   Adafruit_Madgwick filter_dynamic_bias_[Config::DYNAMIC_BETA_COUNT];
-  // Additional camera-feedback context is intentionally placed after hot
-  // state, preserving the pre-existing layout of the motion controller.
+  // Place this additional camera-feedback array after the motion state so
+  // these per-event fields do not shift hot members that follow the ring.
   SpanPositiveContext span_positive_context_[8];
 };
