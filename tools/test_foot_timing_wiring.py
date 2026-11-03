@@ -12,5 +12,5 @@ assert 'span.left.trimmed_span,span.right.trimmed_span,timing_quality' in cycle
 assert '!span.left.single_outlier && !span.right.single_outlier' in cycle
 assert '!span.left.edge_unverified && !span.right.edge_unverified' in cycle
 logger=(root/'src/psram_logger.cpp').read_text(encoding='utf-8')
-assert 'target8_zero_percent_imbalanced_positive_return_may_use_positive_early_threshold_up_to_1deg' in logger
+assert 'target8_zero_percent_imbalanced_positive_return_may_use_positive_early_threshold_up_to_3deg' in logger
 print('foot timing motion and telemetry wiring PASS')

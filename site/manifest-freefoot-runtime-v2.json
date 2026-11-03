@@ -1,6 +1,6 @@
 {
   "name": "AtomS3R Lateral Energy Control",
-  "version": "1.0.75-foot-timing",
+  "version": "1.0.76-adaptive-timing",
   "new_install_improv_wait_time": 0,
   "builds": [
     {

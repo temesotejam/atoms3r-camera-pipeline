@@ -61,7 +61,7 @@ header = converter.parse_header(data)
 metadata = converter.expand_tables(json.loads(data[110:110+header['metadata_json_size']], parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value))))
 assert metadata['metadata_json_final_bytes'] == header['metadata_json_size']
 assert not metadata['metadata_event_detail_truncated']
-assert metadata['firmware_revision']=='1.0.75-foot-timing'
+assert metadata['firmware_revision']=='1.0.76-adaptive-timing'
 for manifest in ('site/manifest.json','site/manifest-freefoot-runtime-v2.json'):
     cfg=json.loads(Path(manifest).read_text())
     assert cfg['version']==metadata['firmware_revision']
@@ -279,8 +279,8 @@ for work_first, suffix in ((False, '.fallback-first.rwlog'), (True, '.work-first
     assert work_metadata['tilt_priority']['target_step_deg'] == 0.5
     assert work_metadata['tilt_priority']['initial_width_ms'] == 60
     assert work_metadata['tilt_priority']['max_width_ms'] == 150
-    assert work_metadata['foot_timing']['revision'] == 'asymmetric_early_inward_v1'
-    assert work_metadata['foot_timing']['max_early_deg'] == 1
+    assert work_metadata['foot_timing']['revision'] == 'asymmetric_early_inward_v2'
+    assert work_metadata['foot_timing']['max_early_deg'] == 3
     assert work_metadata['foot_timing']['hardware_validated'] is False
     speed_guard = work_metadata['tilt_priority']['speed_guard']
     assert speed_guard['signal'] == 'zero_cross_abs_rate_dps'

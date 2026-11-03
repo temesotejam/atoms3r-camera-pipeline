@@ -45,11 +45,11 @@ class Controller {
     }
     foot_weak_count_=continuous ? (foot_weak_count_<2 ? foot_weak_count_+1 : 2) : 1;
   }
-  // Trial: at the return from the positive body peak, allow an inward
-  // threshold up to one degree before absolute zero. The negative excursion
-  // has been the weak one in run 590. Persistent camera evidence can request
-  // this sooner; otherwise require a large observed peak imbalance. This is
-  // an input timing experiment, not a measured ground step or guarantee.
+  // Trial: as the negative excursion weakens, move the inward trigger
+  // gradually up to three degrees before zero. The negative excursion was
+  // weak in runs 590 and 305. The threshold is bounded both by the latest
+  // positive peak and by the measured inter-side gap. This is an input
+  // timing experiment, not a measured ground step or guarantee.
   __attribute__((noinline)) float negativeEarlyThreshold(uint32_t now,int peak_side) const {
     if(peak_side!=1 || !now)return 0.f;
     const History& plus=history_[1];const History& minus=history_[0];
@@ -58,8 +58,8 @@ class Controller {
        !std::isfinite(plus.peak_deg) || !std::isfinite(minus.peak_deg))return 0.f;
     const bool observed_foot=foot_weak_count_>=2 && now>=foot_end_ && now-foot_end_<=2500;
     const float gap=plus.peak_deg-minus.peak_deg;
-    if(!(gap>=3.f || (observed_foot && gap>=1.f)))return 0.f;
-    return std::fmin(1.f,plus.peak_deg*.2f);
+    if(!(gap>=2.5f || (observed_foot && gap>=1.f)))return 0.f;
+    return std::fmin(3.f,std::fmin(plus.peak_deg*.4f,std::fmax(1.f,gap*.6f)));
   }
 
   // The crossing and its accepted result have run-relative timestamps. A
