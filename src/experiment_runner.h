@@ -44,6 +44,7 @@
 #include "experiment_status.h"
 #include "gyro_heading_diagnostic.h"
 #include "stall_rescue.h"
+#include "negative_weak_probe.h"
 
 class ExperimentRunner {
 public:
@@ -840,4 +841,5 @@ private:
   uint32_t stall_rescue_attempted_peak_ms_=0;
   bool stall_rescue_event_=false;
   bool gyro_heading_start_pending_ = false;
+  negative_weak_probe::Controller negative_weak_probe_;
 };

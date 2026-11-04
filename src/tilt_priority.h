@@ -16,6 +16,7 @@ struct Input {
   float crossing_rate_dps=NAN;
   int8_t next_side=0;
   uint16_t hardware_cap_ms=0;
+  uint16_t negative_cap_extra_ms=0;
   bool hardware_healthy=false;
 };
 struct Choice {
@@ -172,7 +173,10 @@ class Controller {
         in.crossing_rate_dps<target*10.f;
     if(overshoot && !recovery) {out.selected=true;out.coast=true;return out;}
     uint16_t cap=in.hardware_cap_ms<150 ? in.hardware_cap_ms : 150;
-    if(h.width_ms<cap)cap=h.width_ms;
+    uint16_t side_cap=h.width_ms;
+    if(in.next_side<0 && in.target_deg==8.f && target_deg_==8.f && in.negative_cap_extra_ms)
+      side_cap=static_cast<uint16_t>(side_cap+(in.negative_cap_extra_ms<5 ? in.negative_cap_extra_ms : 5));
+    if(side_cap<cap)cap=side_cap;
     if(fresh && h.paired_ms==h.peak_ms && h.elapsed_ms) {
       // The previous timing is evidence, not a guarantee about a new pulse.
       if(h.elapsed_ms<=30) {out.selected=true;out.coast=true;return out;}

@@ -98,6 +98,7 @@ int main(int argc,char** argv){
     PsramLogger::EnergyControlAutonomousPeakEvent p{};p.peak_amplitude_deg=8;
     logger.addEnergyControlAutonomousPeakEvent(p);
     PsramLogger::EnergyControlAutonomousZeroCrossEvent z{};z.zero_cross_time_ms=i*100;
+    if(i==0) { z.weak_probe_baseline_ms=145;z.weak_probe_requested_ms=150;z.weak_probe_executed=true; }
     z.pre_input_measured_current_mA=17;z.pre_input_wheel_speed_rpm=123.5;
     z.unclamped_energy_request_j=.00040325f;z.q_unclamped_mA_s=9.01853f;z.unclamped_inverse_valid=true;
     z.maximum_input_work_j=.00003841f;z.predicted_current_goal_mA=153.f;z.predicted_current_rise_tau_s=.070f;
@@ -138,6 +139,9 @@ int main(int argc,char** argv){
   exportFile.build();const auto status=exportFile.status();
   std::cerr<<"metadata bytes="<<exportFile.metadata_.length()<<" phase="<<int(status.phase)<<" error="<<status.error<<"\n";
   assert(status.phase==ImmutableExport::Phase::Ready);
+  const std::string metadata(exportFile.metadata_.c_str());
+  assert(metadata.find("\"weak_probe_baseline_ms\",\"weak_probe_requested_ms\",\"weak_probe_executed\"")!=std::string::npos);
+  assert(metadata.find(",145,150,true,")!=std::string::npos);
   assert(exportFile.prepare());assert(exportFile.status().token==std::string(status.token));
   std::ofstream out(argv[1],std::ios::binary);uint8_t bytes[4096];
   for(uint32_t offset=0;offset<status.bytes;){

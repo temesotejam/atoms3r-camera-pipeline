@@ -1,6 +1,7 @@
 #define FOOT_TREND_CYCLES 2
 #include "tilt_priority.h"
 #include "stall_rescue.h"
+#include "negative_weak_probe.h"
 #include "wheel_cycle_guard.h"
 #include "foot_span_control.h"
 #include "peak_error_adaptation.h"
@@ -24,6 +25,7 @@ struct EnergyControlAutonomousZeroCrossEvent {
  bool side_mismatch_diagnostic=false,energy_model_extrapolated=false,work_prediction_cross_condition=false;
  uint8_t work_control_branch=0,reason=0;uint16_t work_brake_cap_ms=0,solver_selected_integer_width_ms=0;
  uint16_t wheel_guard_legacy_ms=0,wheel_guard_extra_ms=0;bool wheel_guard_trial_eligible=false;
+ uint16_t weak_probe_baseline_ms=0,weak_probe_requested_ms=0;bool weak_probe_executed=false;
  float passive_energy_j=1,free_next_peak_amplitude_deg=1,predicted_energy_j=1,predicted_observed_energy_j=1;
  float predicted_next_peak_amplitude_deg=1,predicted_observed_next_peak_deg=1,predicted_wheel_work_j=1;
  float predicted_input_work_j=1,predicted_post_input_work_j=1,predicted_work_change_j=1;
@@ -47,6 +49,7 @@ class ExperimentRunner {public:
  Status status_;Imu imu_obj;Roller roller_obj;Imu* imu_=&imu_obj;Roller* roller_=&roller_obj;
  tilt_priority::Controller tilt_priority_;foot_span_control::Controller foot_span_control_;
  wheel_cycle_guard::Controller wheel_cycle_guard_;
+ negative_weak_probe::Controller negative_weak_probe_;
  Resettable weak_side_assist_,walking_loss_feedback_,walking_low_speed_guard_;
  Adaptive adaptive_cg_;bool mode=true,begin_ok=true;unsigned calls=0;int sign=0,ma=0;uint16_t width=0;
  float run_cg_shift_mm_=0,pending_cg_shift_mm_=0,pending_target_energy_j_=NAN;
@@ -70,6 +73,43 @@ class ExperimentRunner {public:
 // METHOD_SOURCE
 using Event=PsramLogger::EnergyControlAutonomousZeroCrossEvent;
 int main(){
+ // Construct a mature stage with real paired tilt observations and separately
+ // feed four valid weak-side observations to the experimental tracker.
+ auto prepare_probe=[](ExperimentRunner& r,bool timing_block) {
+  uint32_t t=1000;r.tilt_priority_.peak(1,100,2.f);
+  auto peak=[&](int side,float angle,uint32_t delay) {
+    tilt_priority::Choice c;c.selected=true;c.coast=true;c.direction=side;c.target_deg=r.tilt_priority_.target();
+    r.tilt_priority_.crossing(side,t);r.tilt_priority_.confirm(side,t,c,true);
+    r.tilt_priority_.peak(side,t+delay,angle);t+=300;
+  };
+  while(r.tilt_priority_.target()<8.f){peak(-1,3.f,100);peak(1,3.f,100);}
+  for(int i=0;i<4;++i) {
+    uint32_t pos=t+100;peak(1,6.f,100);
+    r.negative_weak_probe_.peak(1,pos,6.f,8.f,true,true);
+    r.negative_weak_probe_.command(-1,t,58,60,true);
+    uint32_t neg=t+(timing_block?80:150);peak(-1,3.5f,timing_block?80:150);
+    r.negative_weak_probe_.peak(-1,neg,3.5f,8.f,true,true);
+  }
+  uint32_t pos=t+100;peak(1,6.f,100);r.negative_weak_probe_.peak(1,pos,6.f,8.f,true,true);
+  assert(r.negative_weak_probe_.candidate(t,8.f,60,true));return t;
+ };
+ {ExperimentRunner r;auto t=prepare_probe(r,false);Event e;e.physical_next_peak_side=-1;
+  assert(r.tryTiltPriority(e,t));assert(e.output_executed && e.weak_probe_executed);
+  assert(e.weak_probe_baseline_ms==60 && e.weak_probe_requested_ms==65 && e.pulse_width_ms==65);
+  assert(r.negative_weak_probe_.attempted());}
+ {ExperimentRunner r;auto t=prepare_probe(r,false);
+  r.wheel_cycle_guard_.limit(1,-400.f,true,t-100,60);
+  Event e;e.physical_next_peak_side=-1;e.pre_input_wheel_speed_rpm=-400.f;
+  assert(r.tryTiltPriority(e,t));assert(e.output_executed && e.weak_probe_executed);
+  assert(e.weak_probe_baseline_ms==45 && e.weak_probe_requested_ms==49 && e.pulse_width_ms==49);}
+ {ExperimentRunner r;auto t=prepare_probe(r,true);Event e;e.physical_next_peak_side=-1;
+  assert(r.tryTiltPriority(e,t));assert(e.output_executed && !e.weak_probe_executed);
+  assert(e.weak_probe_baseline_ms==50 && e.weak_probe_requested_ms==50 && e.pulse_width_ms==50);
+  assert(!r.negative_weak_probe_.attempted());}
+ {ExperimentRunner r;auto t=prepare_probe(r,false);r.begin_ok=false;Event e;e.physical_next_peak_side=-1;
+  assert(r.tryTiltPriority(e,t));assert(!e.output_executed && !e.weak_probe_executed);
+  assert(e.weak_probe_baseline_ms==60 && e.weak_probe_requested_ms==65);
+  assert(!r.negative_weak_probe_.attempted());}
  // The real dispatch records the old limit and bounded additional change.
  {ExperimentRunner r;
   r.wheel_cycle_guard_.peak(-1,5.3f,100,true);r.wheel_cycle_guard_.peak(1,5.4f,450,true);

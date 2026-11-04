@@ -14,13 +14,13 @@ class Detector {
     const bool finite=std::isfinite(peak_deg) && std::isfinite(prior_angle) &&
       std::isfinite(angle) && std::isfinite(prior_rate) && std::isfinite(rate);
     if(!finite || !peak_ms || now<=prior_ms || now-prior_ms>10 || now<peak_ms ||
-       now-peak_ms<200 || now-peak_ms>800 || peak_deg<5.f || angle<1.f ||
+       now-peak_ms<200 || now-peak_ms>800 || peak_deg<5.f || angle<.35f ||
        angle>3.25f || peak_deg-angle<2.f || prior_angle+.03f<angle ||
-       rate < -3.5f || rate>=-.1f || (peak_ms_ && peak_ms_!=peak_ms)) {
+       rate < -6.5f || rate>=-.1f || (peak_ms_ && peak_ms_!=peak_ms)) {
       reset();return false;
     }
     if(!pending_ms_) {
-      if(prior_rate>=-3.f || rate< -3.f)return false;
+      if(prior_rate>=-6.f || rate< -6.f)return false;
       pending_ms_=now;peak_ms_=peak_ms;samples_=1;return false;
     }
     if(now-pending_ms_>30) {reset();return false;}

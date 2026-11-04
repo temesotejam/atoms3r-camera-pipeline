@@ -343,6 +343,8 @@ class PsramLogger {
     float interpolated_crossing_time_ms = NAN;
     bool q_gain_extrapolated = false;
     bool rate_support_diagnostic = false;
+    // These guarded pulse widths are capped at 150 ms by tilt_priority.
+    uint8_t weak_probe_baseline_ms=0,weak_probe_requested_ms=0;
     float q_available_mA_s = NAN;
     float predicted_energy_j = NAN;
     float prediction_bias_j = 0.0f;
@@ -370,6 +372,7 @@ class PsramLogger {
     uint16_t startup_positive_cap_ms=0;
     uint16_t wheel_guard_legacy_ms=0,wheel_guard_extra_ms=0;
     bool wheel_guard_trial_eligible=false;
+    bool weak_probe_executed=false;
     float foot_energy_bias=NAN,foot_energy_left_px=NAN,foot_energy_right_px=NAN;
     bool foot_energy_valid=false;uint8_t foot_energy_phase=0,foot_energy_reason=0;
     float low_peak_bias_mj=NAN,low_peak_base_prediction_mj=NAN,low_peak_applied_bias_mj=NAN;
@@ -768,3 +771,7 @@ private:
   bool ready_ = false;
   const char* last_error_ = "not_initialized";
 };
+
+
+
+

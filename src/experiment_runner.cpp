@@ -2568,6 +2568,7 @@ void ExperimentRunner::resetEnergyControlAutonomous() {
   foot_balance_.reset(status_.run_id);foot_energy_.reset(status_.run_id);wheel_speed_balance_.reset();gradual_start_.reset();foot_frame_run_id_=0;
   foot_phase_observer_.reset(status_.run_id);foot_phase_cap_.reset();phase_observer_sequence_=0;
   foot_span_observer_.reset(status_.run_id);foot_span_control_.reset();weak_side_assist_.reset();
+  negative_weak_probe_.reset();
   positive_left_boost_.reset();positive_left_input_=positive_left_boost::Input{};tilt_priority_.reset();wheel_cycle_guard_.reset();span_observer_sequence_=0;
   span_positive_decision_next_=0;
   for (auto& x:span_positive_decisions_) x=SpanPositiveDecision{};
@@ -3027,6 +3028,9 @@ void ExperimentRunner::notifyPositiveLeftPeak(
         energy_control_autonomous_pending_mode_==peak_error_adaptation::Excite);
     if(healthy)
       tilt_priority_.peak(physical_side,peak_ms,amplitude_deg);
+    negative_weak_probe_.peak(physical_side,peak_ms,amplitude_deg,tilt_priority_.target(),
+        paired_time && event.pending_command_matched &&
+        energy_control_autonomous_pending_mode_==peak_error_adaptation::Excite,healthy);
     positive_left_boost_.peak(physical_side,peak_ms,amplitude_deg,
         imu_ && imu_->acquisitionHealthy() && !imu_->stale(millis()) &&
         event.peak_speed_valid && event.peak_speed_age_us<=30000);
@@ -3627,6 +3631,15 @@ bool ExperimentRunner::tryTiltPriorityImpl(
   if(healthy_out)*healthy_out=in.hardware_healthy;
   if(!in.hardware_healthy) wheel_cycle_guard_.reset();
   auto choice=tilt_priority_.propose(in);
+  const uint16_t negative_baseline_cap=tilt_priority_.widthLimit(-1);
+  const bool probe_candidate=!stall_rescue_event_ && in.next_side<0 &&
+      choice.selected && !choice.coast && negative_weak_probe_.candidate(
+          t_test_ms,in.target_deg,negative_baseline_cap,in.hardware_healthy);
+  auto probe_choice=choice;
+  if(probe_candidate) {
+    auto probe_in=in;probe_in.negative_cap_extra_ms=5;
+    probe_choice=tilt_priority_.propose(probe_in);
+  }
   if(stall_rescue_event_ && (!choice.selected || choice.coast))return false;
   // Record every accepted healthy crossing, even when ordinary control is
   // selected. It will be paired with the corresponding measured peak.
@@ -3665,6 +3678,21 @@ bool ExperimentRunner::tryTiltPriorityImpl(
   const auto wheel_guard_before=wheel_cycle_guard_;
   choice.width_ms=wheel_cycle_guard_.limit(in.next_side,event.pre_input_wheel_speed_rpm,
       in.hardware_healthy,t_test_ms,choice.width_ms);
+  const auto wheel_guard_after_baseline=wheel_cycle_guard_;
+  const uint16_t probe_baseline_ms=choice.width_ms;
+  bool probe_selected=false;
+  if(probe_candidate && probe_choice.selected && !probe_choice.coast &&
+      probe_choice.direction==choice.direction && probe_choice.current_ma==choice.current_ma) {
+    auto probe_guard=wheel_guard_before;
+    probe_choice.width_ms=probe_guard.limit(in.next_side,event.pre_input_wheel_speed_rpm,
+        in.hardware_healthy,t_test_ms,probe_choice.width_ms);
+    event.weak_probe_baseline_ms=probe_baseline_ms;
+    event.weak_probe_requested_ms=probe_choice.width_ms;
+    if(probe_choice.width_ms>choice.width_ms &&
+        probe_choice.width_ms-choice.width_ms<=5) {
+      choice=probe_choice;wheel_cycle_guard_=probe_guard;probe_selected=true;
+    }
+  }
   if(in.next_side>0 && choice.width_ms!=before_wheel_guard) {
     if(foot_adjusted) {
       wheel_cycle_guard_=wheel_guard_before;
@@ -3700,6 +3728,8 @@ bool ExperimentRunner::tryTiltPriorityImpl(
   event.valid=false;event.output_executed=false;
   if(!choice.coast && !beginEnergyControlAutonomousPulse(run_start_ms_+t_test_ms,t_test_ms,
                                         choice.direction,choice.width_ms,choice.current_ma)) {
+    if(probe_selected)wheel_cycle_guard_=wheel_guard_after_baseline;
+    if(!stall_rescue_event_)negative_weak_probe_.command(in.next_side,t_test_ms,0,negative_baseline_cap,false);
     tilt_priority_.confirm(in.next_side,t_test_ms,choice,false);
     event.command_current_mA=0;event.pulse_width_ms=0;
     event.q_command_direction=0;event.command_matches_zero_cross_motion=false;
@@ -3709,6 +3739,13 @@ bool ExperimentRunner::tryTiltPriorityImpl(
   }
   if(stall_rescue_event_ && !choice.coast)weak_side_assist_.interrupt();
   tilt_priority_.confirm(in.next_side,t_test_ms,choice,true);
+  if(!stall_rescue_event_) {
+    if(probe_selected) {
+      negative_weak_probe_.attempt(t_test_ms,true,probe_baseline_ms,choice.width_ms);
+      event.weak_probe_executed=true;
+    }
+    negative_weak_probe_.command(in.next_side,t_test_ms,choice.width_ms,negative_baseline_cap,!choice.coast);
+  }
   event.valid=true;event.output_executed=!choice.coast;
   event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_selected,
       foot_adjusted && event.output_executed);
@@ -7420,3 +7457,4 @@ const char* ExperimentRunner::stateName() const {
   }
   return "UNKNOWN";
 }
+
