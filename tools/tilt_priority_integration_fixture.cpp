@@ -2,6 +2,7 @@
 #include "tilt_priority.h"
 #include "stall_rescue.h"
 #include "long_foot_balance.h"
+#include "negative_cap_recovery.h"
 #include "wheel_cycle_guard.h"
 #include "foot_span_control.h"
 #include "peak_error_adaptation.h"
@@ -33,7 +34,7 @@ struct EnergyControlAutonomousZeroCrossEvent {
  float predicted_current_rise_tau_s=1,aligned_initial_current_mA=1;
  bool command_matches_zero_cross_motion=false,valid=false,output_executed=false;
  int16_t command_current_mA=0;uint16_t pulse_width_ms=0;uint32_t pulse_start_ms=0,pulse_end_ms=0;
- enum FootSpanFlag : uint16_t { Span_selected=2 };
+ enum FootSpanFlag : uint16_t { Span_selected=2, NegativeRecoveryStateBit0=1u<<12, NegativeRecoveryStateBit1=1u<<13 };
  uint16_t foot_span_baseline_ms=0,foot_span_requested_ms=0,foot_span_flags=0;
  void setFootSpanFlag(FootSpanFlag f,bool v){if(v)foot_span_flags|=f;else foot_span_flags&=~f;}
 };
@@ -50,6 +51,8 @@ class ExperimentRunner {public:
  tilt_priority::Controller tilt_priority_;foot_span_control::Controller foot_span_control_;
  wheel_cycle_guard::Controller wheel_cycle_guard_;
  long_foot_balance::Controller long_foot_balance_;
+ negative_cap_recovery::Controller negative_cap_recovery_;
+ uint32_t negative_recovery_last_applied_ms_=0;
  uint32_t foot_trial_pending_ms_=0,foot_trial_pending_generation_=0;
  bool foot_trial_pending_effective_=false;
  Resettable weak_side_assist_,walking_loss_feedback_,walking_low_speed_guard_;
@@ -75,6 +78,96 @@ class ExperimentRunner {public:
 // METHOD_SOURCE
 using Event=PsramLogger::EnergyControlAutonomousZeroCrossEvent;
 int main(){
+ // Seed the real tilt controller with an overshoot-induced negative cap of
+ // 30ms and a completed 8-degree startup; no actuator shortcuts are used.
+ auto prepare_negative=[](ExperimentRunner& r) {
+  uint32_t t=1000;r.tilt_priority_.peak(1,100,2.f);
+  for(int n=0;n<3;++n)for(int side:{-1,1}) {
+   tilt_priority::Choice c;c.selected=true;c.direction=static_cast<int8_t>(side);
+   c.width_ms=r.tilt_priority_.widthLimit(side);c.current_ma=1200;c.target_deg=r.tilt_priority_.target();
+   r.tilt_priority_.crossing(static_cast<int8_t>(side),t);
+   r.tilt_priority_.confirm(static_cast<int8_t>(side),t,c,true);
+   r.tilt_priority_.peak(static_cast<int8_t>(side),t+100,side<0?8.f:3.f);t+=300;
+  }
+  assert(r.tilt_priority_.widthLimit(-1)==30);
+  for(int n=0;n<14;++n)for(int side:{-1,1}) {
+   tilt_priority::Choice c;c.selected=true;c.coast=true;c.direction=static_cast<int8_t>(side);c.target_deg=r.tilt_priority_.target();
+   r.tilt_priority_.crossing(static_cast<int8_t>(side),t);
+   r.tilt_priority_.confirm(static_cast<int8_t>(side),t,c,true);
+   r.tilt_priority_.peak(static_cast<int8_t>(side),t+100,3.f);t+=300;
+  }
+  assert(r.tilt_priority_.target()==8.f);
+  for(int i=0;i<6;++i) {
+   const uint32_t start=t-4300+i*700,end=start+700;
+   r.negative_cap_recovery_.peak(1,start+300,6.f,true,true);
+   r.negative_cap_recovery_.peak(-1,end,5.f,true,true);
+   r.negative_cap_recovery_.footCycle(start,end,3.f,.5f,true,true,true);
+  }
+  assert(r.negative_cap_recovery_.candidate(t,8.f,30,true,true));
+  return t;
+ };
+ // The first send and each held pulse use the same pre-guard history.
+ {ExperimentRunner r;auto t=prepare_negative(r);Event e;e.physical_next_peak_side=-1;
+  assert(r.tryTiltPriority(e,t));assert(e.output_executed && e.pulse_width_ms==35);
+  assert(e.weak_probe_baseline_ms==30 && e.weak_probe_requested_ms==35 && e.weak_probe_executed);
+  assert(r.negative_cap_recovery_.active());
+  Event held;held.physical_next_peak_side=-1;assert(r.tryTiltPriority(held,t+300));
+  assert(held.pulse_width_ms==35 && held.weak_probe_executed);}
+ // A rejected send cannot start the trial or advance its output history.
+ {ExperimentRunner r;auto t=prepare_negative(r);r.begin_ok=false;Event e;e.physical_next_peak_side=-1;
+  const auto guard_before=r.wheel_cycle_guard_;
+  assert(r.tryTiltPriority(e,t));assert(!e.output_executed && !e.weak_probe_executed);
+  assert(!r.negative_cap_recovery_.active() && !r.negative_cap_recovery_.attempted());
+  auto reference=guard_before;assert(r.wheel_cycle_guard_.limit(1,300.f,true,t+100,60)==reference.limit(1,300.f,true,t+100,60));}
+ // Guard-reduced baseline and candidate still use the same prior history.
+ {ExperimentRunner r;auto t=prepare_negative(r);
+  r.wheel_cycle_guard_.limit(1,-400.f,true,t-100,60);auto reference=r.wheel_cycle_guard_;
+  assert(reference.limit(-1,-400.f,true,t,35)==27);
+  Event e;e.physical_next_peak_side=-1;e.pre_input_wheel_speed_rpm=-400.f;
+  assert(r.tryTiltPriority(e,t));assert(e.output_executed && e.pulse_width_ms==27);
+  assert(e.weak_probe_baseline_ms==23 && e.weak_probe_requested_ms==27 && e.weak_probe_executed);
+  assert(r.negative_cap_recovery_.active());}
+ // A timing cap that makes both candidates equal is not a successful probe.
+ {ExperimentRunner r;auto t=prepare_negative(r);
+  tilt_priority::Choice c;c.selected=true;c.direction=-1;c.width_ms=30;c.current_ma=1200;c.target_deg=8;
+  r.tilt_priority_.crossing(-1,t-400);r.tilt_priority_.confirm(-1,t-400,c,true);
+  r.tilt_priority_.peak(-1,t-340,3.f);
+  Event e;e.physical_next_peak_side=-1;assert(r.tryTiltPriority(e,t));
+  assert(e.output_executed && e.pulse_width_ms==30);
+  assert(e.weak_probe_baseline_ms==30 && e.weak_probe_requested_ms==30 && !e.weak_probe_executed);
+  assert(!r.negative_cap_recovery_.active() && !r.negative_cap_recovery_.attempted());}
+ // Active negative trial blocks the normal positive foot proposal.
+ {ExperimentRunner r;auto t=prepare_negative(r);Event e;e.physical_next_peak_side=-1;
+  assert(r.tryTiltPriority(e,t));assert(r.negative_cap_recovery_.active());
+  Event positive;positive.physical_next_peak_side=1;assert(r.tryTiltPriority(positive,t+100));
+  assert(positive.output_executed && !(positive.foot_span_flags&Event::Span_selected));}
+ // A temporary trial can equal the ordinary cap by coincidence after taper.
+ // It must not train the permanent cap up, but overshoot must still reduce it.
+ {ExperimentRunner r;auto t=prepare_negative(r);
+  for(int n=0;n<2;++n) {
+   const auto pulse=t+n*600;Event e;e.physical_next_peak_side=-1;e.zero_cross_abs_rate_dps=53.3f;
+   assert(r.tryTiltPriority(e,pulse));assert(e.weak_probe_executed);
+   assert(e.weak_probe_baseline_ms==26 && e.pulse_width_ms==30);
+   r.tilt_priority_.peak(-1,pulse+100,5.f);
+   tilt_priority::Choice c;c.selected=true;c.coast=true;c.direction=1;c.target_deg=8.f;
+   r.tilt_priority_.crossing(1,pulse+200);r.tilt_priority_.confirm(1,pulse+200,c,true);
+   r.tilt_priority_.peak(1,pulse+300,3.f);
+  }
+  assert(r.tilt_priority_.widthLimit(-1)==30);
+  const auto pulse=t+1200;Event over;over.physical_next_peak_side=-1;over.zero_cross_abs_rate_dps=53.3f;
+  assert(r.tryTiltPriority(over,pulse));assert(over.weak_probe_executed);
+  r.tilt_priority_.peak(-1,pulse+100,10.f);
+  tilt_priority::Choice c;c.selected=true;c.coast=true;c.direction=1;c.target_deg=8.f;
+  r.tilt_priority_.crossing(1,pulse+200);r.tilt_priority_.confirm(1,pulse+200,c,true);
+  r.tilt_priority_.peak(1,pulse+300,3.f);
+  assert(r.tilt_priority_.widthLimit(-1)==20);}
+ // Loss of wheel-work mode cancels the experiment; it may not restart in
+ // the same run merely because the mode later becomes available again.
+ {ExperimentRunner r;auto t=prepare_negative(r);Event e;e.physical_next_peak_side=-1;
+  assert(r.tryTiltPriority(e,t));assert(r.negative_cap_recovery_.active());r.mode=false;
+  Event fail;fail.physical_next_peak_side=-1;assert(!r.tryTiltPriority(fail,t+200));
+  assert(!r.negative_cap_recovery_.active() && r.negative_cap_recovery_.attempted());r.mode=true;
+  assert(!r.negative_cap_recovery_.candidate(t+300,8.f,30,true,true));}
  // The real dispatch records the old limit and bounded additional change.
  {ExperimentRunner r;
   r.wheel_cycle_guard_.peak(-1,5.3f,100,true);r.wheel_cycle_guard_.peak(1,5.4f,450,true);

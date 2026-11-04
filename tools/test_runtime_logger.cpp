@@ -99,6 +99,8 @@ int main(int argc,char** argv){
     logger.addEnergyControlAutonomousPeakEvent(p);
     PsramLogger::EnergyControlAutonomousZeroCrossEvent z{};z.zero_cross_time_ms=i*100;
     if(i==0) { z.weak_probe_baseline_ms=145;z.weak_probe_requested_ms=150;z.weak_probe_executed=true; }
+    if(i==1) { z.physical_next_peak_side=-1;z.weak_probe_baseline_ms=28;z.weak_probe_requested_ms=33;z.weak_probe_executed=true;
+      z.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::NegativeRecoveryStateBit0,true); }
     z.pre_input_measured_current_mA=17;z.pre_input_wheel_speed_rpm=123.5;
     z.unclamped_energy_request_j=.00040325f;z.q_unclamped_mA_s=9.01853f;z.unclamped_inverse_valid=true;
     z.maximum_input_work_j=.00003841f;z.predicted_current_goal_mA=153.f;z.predicted_current_rise_tau_s=.070f;
@@ -142,6 +144,7 @@ int main(int argc,char** argv){
   const std::string metadata(exportFile.metadata_.c_str());
   assert(metadata.find("\"long_foot_counterfactual_ms\",\"long_foot_actual_ms\",\"long_foot_effective\"")!=std::string::npos);
   assert(metadata.find(",145,150,true,")!=std::string::npos);
+  assert(metadata.find(",28,33,true,")!=std::string::npos);
   assert(exportFile.prepare());assert(exportFile.status().token==std::string(status.token));
   std::ofstream out(argv[1],std::ios::binary);uint8_t bytes[4096];
   for(uint32_t offset=0;offset<status.bytes;){

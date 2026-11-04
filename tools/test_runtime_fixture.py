@@ -61,7 +61,7 @@ header = converter.parse_header(data)
 metadata = converter.expand_tables(json.loads(data[110:110+header['metadata_json_size']], parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value))))
 assert metadata['metadata_json_final_bytes'] == header['metadata_json_size']
 assert not metadata['metadata_event_detail_truncated']
-assert metadata['firmware_revision']=='1.0.90-long-foot-window'
+assert metadata['firmware_revision']=='1.0.91-two-cycle-recovery'
 for manifest in ('site/manifest.json','site/manifest-freefoot-runtime-v2.json'):
     cfg=json.loads(Path(manifest).read_text())
     assert cfg['version']==metadata['firmware_revision']
@@ -186,7 +186,14 @@ with tempfile.TemporaryDirectory() as tmp:
     subprocess.run([sys.executable,str(standalone),str(source),'--out',str(Path(tmp)/'standalone')],check=True)
     converter.convert(source, output)
     with (output/'energy_control_autonomous_zero_cross_events.csv').open() as stream:
-        converted_zero=next(csv.DictReader(stream))
+        converted_rows=list(csv.DictReader(stream))
+    converted_zero=converted_rows[0]
+    negative=converted_rows[1]
+    assert negative['physical_next_peak_side']=='-1'
+    assert negative['negative_recovery_baseline_ms']=='28' and negative['negative_recovery_candidate_ms']=='33'
+    assert negative['negative_recovery_executed']=='True' and negative['negative_recovery_state']=='1'
+    assert negative['long_foot_actual_ms']==''
+    assert converted_zero['long_foot_actual_ms']=='150' and converted_zero['negative_recovery_candidate_ms']==''
     assert abs(float(converted_zero['maximum_effective_arrival_energy_increment_j'])-.00003841)<1e-8
     assert converted_zero['maximum_input_work_j']==''
     with (output/'timeseries.csv').open() as stream:

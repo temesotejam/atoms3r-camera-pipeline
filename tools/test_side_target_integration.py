@@ -84,6 +84,7 @@ selector_fixture=r'''#define FOOT_TREND_CYCLES 2
 #include "gradual_start.h"
 #include "foot_span_control.h"
 #include "long_foot_balance.h"
+#include "negative_cap_recovery.h"
 #include "foot_span_candidate.h"
 #include "peak_error_adaptation.h"
 #include <cassert>
@@ -109,6 +110,7 @@ class ExperimentRunner {public:
  Roller roller_storage;Imu imu_storage;Roller* roller_=&roller_storage;Imu* imu_=&imu_storage;
  Status status_;gradual_start::Controller gradual_start_;foot_span_control::Controller foot_span_control_;
  long_foot_balance::Controller long_foot_balance_;
+ negative_cap_recovery::Controller negative_cap_recovery_;
  lateral_energy::CurrentTable positive_current_probe_tables_[2],lateral_current_table_;
  bool wheelWorkMode()const{return true;}
  void requestEmergencyStop(const char*){status_.emergency_stop=true;}

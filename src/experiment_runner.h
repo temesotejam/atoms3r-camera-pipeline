@@ -45,6 +45,7 @@
 #include "gyro_heading_diagnostic.h"
 #include "stall_rescue.h"
 #include "long_foot_balance.h"
+#include "negative_cap_recovery.h"
 
 class ExperimentRunner {
 public:
@@ -842,6 +843,8 @@ private:
   bool stall_rescue_event_=false;
   bool gyro_heading_start_pending_ = false;
   long_foot_balance::Controller long_foot_balance_;
+  negative_cap_recovery::Controller negative_cap_recovery_;
+  uint32_t negative_recovery_last_applied_ms_=0;
   // Pair a guarded intervention with the exact positive command in a later
   // camera cycle. Kept separate from the hot decision record.
   uint32_t foot_trial_pending_ms_=0,foot_trial_pending_generation_=0;

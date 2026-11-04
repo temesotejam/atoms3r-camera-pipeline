@@ -18,6 +18,11 @@ class Controller {
   unsigned samples()const{return n_;}
   int offset()const{return offset_;}
   int requestedOffset()const{return requested_;}
+  uint32_t lastChangeMs()const{return changed_at_;}
+  // The negative-side experiment may start only with no pending or applied
+  // foot-width feedback, so it cannot silently discard a useful correction.
+  bool idleForNegativeTrial()const{return offset_==0 && !pending_ &&
+      (state_==State::Collect || state_==State::Hold) && !trialActive();}
   int trialReferenceOffset()const{return active_reference_;}
   int proposedTrialReferenceOffset()const{return pending_ && state_!=State::Restore ? offset_ : active_reference_;}
   uint32_t trialGeneration()const{return trial_generation_;}

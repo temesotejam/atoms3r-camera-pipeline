@@ -83,7 +83,7 @@ class Controller {
     if((side!=1 && side!=-1)||!ms)return;
     History& h=history_[index(side)];h.cross_ms=ms;h.confirmed=false;
   }
-  void confirm(int8_t side,uint32_t ms,const Choice& choice,bool executed) {
+  void confirm(int8_t side,uint32_t ms,const Choice& choice,bool executed,bool temporary_cap_trial=false) {
     if((side!=1 && side!=-1)||!ms)return;
     History& h=history_[index(side)];
     h.confirmed=executed && choice.selected && choice.direction==side &&
@@ -92,6 +92,7 @@ class Controller {
         choice.width_ms>0 && choice.current_ma==1200);
     if(h.confirmed){
       h.command_ms=choice.width_ms;h.was_drive=!choice.coast;h.command_target=choice.target_deg;
+      h.temporary_cap_trial=temporary_cap_trial;
       if(choice.coast) { last_coast_ms_=ms;last_coast_side_=side; }
       else { last_coast_ms_=0;last_coast_side_=0; }
     } else { last_coast_ms_=0;last_coast_side_=0; }
@@ -112,7 +113,7 @@ class Controller {
     h.evidence=0;
     if(initial_peak_seen_ && paired && h.was_drive && std::isfinite(h.command_target)) {
       if(angle>h.command_target+1.5f)h.evidence=2;
-      else if(angle<h.command_target-.5f && h.command_ms==h.width_ms)h.evidence=1;
+      else if(!h.temporary_cap_trial && angle<h.command_target-.5f && h.command_ms==h.width_ms)h.evidence=1;
       else h.evidence=3;
     }
     h.confirmed=false;h.cross_ms=0;
@@ -197,7 +198,7 @@ class Controller {
     uint32_t peak_ms=0,cross_ms=0,paired_ms=0;
     uint16_t elapsed_ms=0,command_ms=0,width_ms=60;
     uint8_t under_count=0,evidence=0;
-    bool confirmed=false,was_drive=false;
+    bool confirmed=false,was_drive=false,temporary_cap_trial=false;
   };
   static unsigned index(int side){return side>0?1u:0u;}
   void clearPair(){pair_mask_=0;good_pairs_=0;pair_good_=true;history_[0].evidence=history_[1].evidence=0;}

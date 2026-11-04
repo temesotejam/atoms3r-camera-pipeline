@@ -23,9 +23,15 @@ assert 'long_foot_balance_.observe(' in cycle and 'positive_branch==15' in cycle
 assert 'plus_peak_ms>cycle.start_ms' in cycle and 'plus_peak_ms<negative->ms' in cycle
 assert 'foot_trial_effective_[positive_index]' in cycle
 assert 'foot_trial_generation_[positive_index]==long_foot_balance_.trialGeneration()' in cycle
+assert 'span.start_ms>long_foot_balance_.lastChangeMs()' in cycle
+assert 'negative_cap_recovery_.footCycle(' in cycle and 'neutral_foot_context' in cycle
+assert 'negative_cap_recovery::normalFootReferenceAllowed(' in cycle and 'negative_recovery_last_applied_ms_' in cycle
 assert 'foot_trial_pending_ms_==t_ms && event.output_executed' in decision
 assert 'auto reference_guard=wheel_guard_before' in runner
 assert 'long_foot_balance_.trialReferenceOffset()' in runner
+assert 'negative_cap_recovery_.candidate(' in runner and 'long_foot_balance_.idleForNegativeTrial()' in runner
+assert 'trial_in.negative_cap_extra_ms=5' in runner and 'auto candidate_guard=wheel_guard_before' in runner
+assert 'delta>0 && delta<=5' in runner and 'negative_cap_recovery_.command(' in runner
 assert 'foot_span_control_.cycle(' not in cycle and 'foot_span_control_.confirm(' not in decision
 metadata=(root/'src/psram_logger.cpp').read_text(encoding='utf8')
 assert 'five_valid_rolling_window_v2' in metadata

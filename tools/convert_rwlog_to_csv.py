@@ -56,7 +56,7 @@ def expand_tables(value):
         result = {key: expand_tables(item) for key, item in value.items()}
         if 'foot_span_flags' in result:
             mask = result['foot_span_flags']
-            if type(mask) is not int or mask < 0 or mask >= (1 << 12):
+            if type(mask) is not int or mask < 0 or mask >= (1 << 14):
                 raise ValueError('Invalid foot span flag mask')
             names = ('valid','selected','startup','left_low','right_low','left_both',
                      'right_both','continuous','left_outlier','right_outlier',
@@ -1153,6 +1153,7 @@ ENERGY_CONTROL_AUTONOMOUS_ZERO_CROSS_COLUMNS = [
     "wheel_guard_legacy_ms", "wheel_guard_extra_ms", "wheel_guard_trial_eligible",
     "weak_probe_baseline_ms", "weak_probe_requested_ms", "weak_probe_executed",
     "long_foot_counterfactual_ms", "long_foot_actual_ms", "long_foot_effective",
+    "negative_recovery_baseline_ms", "negative_recovery_candidate_ms", "negative_recovery_executed", "negative_recovery_state",
     "foot_span_state", "foot_span_accepted_cycles", "foot_span_valid", "foot_span_selected",
     "foot_span_startup", "foot_span_left_low", "foot_span_right_low", "foot_span_left_both",
     "foot_span_right_both", "foot_span_continuous", "foot_span_left_outlier", "foot_span_right_outlier",
@@ -1180,6 +1181,12 @@ def write_energy_control_autonomous_events(metadata: dict, out_dir: Path) -> tup
             writer.writeheader()
             for event in zeros:
                 if isinstance(event, dict):
+                    if metadata.get("firmware_revision") == "1.0.91-two-cycle-recovery" and event.get("physical_next_peak_side") == -1:
+                        event = dict(event)
+                        event["negative_recovery_baseline_ms"] = event.pop("long_foot_counterfactual_ms", None)
+                        event["negative_recovery_candidate_ms"] = event.pop("long_foot_actual_ms", None)
+                        event["negative_recovery_executed"] = event.pop("long_foot_effective", None)
+                        event["negative_recovery_state"] = (int(event.get("foot_span_flags", 0)) >> 12) & 3
                     writer.writerow({name: event.get(name) for name in ENERGY_CONTROL_AUTONOMOUS_ZERO_CROSS_COLUMNS})
                     zero_count += 1
     return peak_count, zero_count

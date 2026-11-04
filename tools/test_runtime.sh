@@ -15,6 +15,8 @@ g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc test/test_negative_weak_probe.cpp
 /tmp/test_negative_weak_probe
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc test/test_long_foot_balance.cpp -o /tmp/test_long_foot_balance
 /tmp/test_long_foot_balance
+g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc test/test_negative_cap_recovery.cpp -o /tmp/test_negative_cap_recovery
+/tmp/test_negative_cap_recovery
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_wheel_cycle_guard.cpp -o /tmp/test_wheel_cycle_guard
 /tmp/test_wheel_cycle_guard
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_timing.cpp -o /tmp/test_foot_timing

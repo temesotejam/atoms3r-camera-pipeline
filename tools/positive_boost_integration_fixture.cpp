@@ -1,6 +1,7 @@
 #include "positive_left_boost.h"
 #include "tilt_priority.h"
 #include "negative_weak_probe.h"
+#include "negative_cap_recovery.h"
 #include "wheel_cycle_guard.h"
 #include "wheel_work_energy_control.h"
 #include "peak_error_adaptation.h"
@@ -51,6 +52,7 @@ class ExperimentRunner {
   positive_left_boost::Input positive_left_input_;positive_left_boost::Controller positive_left_boost_;
   tilt_priority::Controller tilt_priority_;
   negative_weak_probe::Controller negative_weak_probe_;
+  negative_cap_recovery::Controller negative_cap_recovery_;
   wheel_cycle_guard::Controller wheel_cycle_guard_;
   peak_error_adaptation::Mode energy_control_autonomous_pending_mode_=peak_error_adaptation::Coast;
   FakeGradual gradual_start_;float energy_control_autonomous_target_peak_deg_=8.f;
