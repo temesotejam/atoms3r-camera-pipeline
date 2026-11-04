@@ -140,7 +140,7 @@ int main(int argc,char** argv){
   std::cerr<<"metadata bytes="<<exportFile.metadata_.length()<<" phase="<<int(status.phase)<<" error="<<status.error<<"\n";
   assert(status.phase==ImmutableExport::Phase::Ready);
   const std::string metadata(exportFile.metadata_.c_str());
-  assert(metadata.find("\"weak_probe_baseline_ms\",\"weak_probe_requested_ms\",\"weak_probe_executed\"")!=std::string::npos);
+  assert(metadata.find("\"long_foot_counterfactual_ms\",\"long_foot_actual_ms\",\"long_foot_effective\"")!=std::string::npos);
   assert(metadata.find(",145,150,true,")!=std::string::npos);
   assert(exportFile.prepare());assert(exportFile.status().token==std::string(status.token));
   std::ofstream out(argv[1],std::ios::binary);uint8_t bytes[4096];

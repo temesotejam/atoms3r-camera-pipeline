@@ -61,7 +61,7 @@ header = converter.parse_header(data)
 metadata = converter.expand_tables(json.loads(data[110:110+header['metadata_json_size']], parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value))))
 assert metadata['metadata_json_final_bytes'] == header['metadata_json_size']
 assert not metadata['metadata_event_detail_truncated']
-assert metadata['firmware_revision']=='1.0.89-long-foot-balance'
+assert metadata['firmware_revision']=='1.0.90-long-foot-window'
 for manifest in ('site/manifest.json','site/manifest-freefoot-runtime-v2.json'):
     cfg=json.loads(Path(manifest).read_text())
     assert cfg['version']==metadata['firmware_revision']
@@ -285,7 +285,8 @@ for work_first, suffix in ((False, '.fallback-first.rwlog'), (True, '.work-first
     assert work_metadata['foot_gap_trend']['revision'] == 'bounded_observation_gaps_v1'
     assert work_metadata['foot_gap_trend']['active_for_actuation'] is False
     foot_balance = work_metadata['foot_span_high_current']
-    assert foot_balance['revision'] == 'five_valid_cycle_balance_v1'
+    assert foot_balance['revision'] == 'five_valid_rolling_window_v2'
+    assert foot_balance['proposal_age_ms'] == 1500
     assert foot_balance['command_mA'] == 1200
     assert foot_balance['minimum_stage_target_deg'] == 6
     assert foot_balance['valid_cycles'] == 5

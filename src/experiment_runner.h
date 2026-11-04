@@ -842,6 +842,12 @@ private:
   bool stall_rescue_event_=false;
   bool gyro_heading_start_pending_ = false;
   long_foot_balance::Controller long_foot_balance_;
+  // Pair a guarded intervention with the exact positive command in a later
+  // camera cycle. Kept separate from the hot decision record.
+  uint32_t foot_trial_pending_ms_=0,foot_trial_pending_generation_=0;
+  bool foot_trial_pending_effective_=false;
+  uint32_t foot_trial_generation_[8]={};
+  bool foot_trial_effective_[8]={};
   float negative_preceding_positive_peaks_[8] = {NAN,NAN,NAN,NAN,NAN,NAN,NAN,NAN};
   uint32_t negative_preceding_positive_peak_ms_[8] = {};
   uint8_t span_positive_branch_[8] = {};

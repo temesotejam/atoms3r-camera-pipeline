@@ -2569,6 +2569,9 @@ void ExperimentRunner::resetEnergyControlAutonomous() {
   foot_phase_observer_.reset(status_.run_id);foot_phase_cap_.reset();phase_observer_sequence_=0;
   foot_span_observer_.reset(status_.run_id);foot_span_control_.reset();weak_side_assist_.reset();
   long_foot_balance_.reset();
+  foot_trial_pending_ms_=foot_trial_pending_generation_=0;foot_trial_pending_effective_=false;
+  for(auto& g:foot_trial_generation_)g=0;
+  for(auto& e:foot_trial_effective_)e=false;
   for(auto& peak:negative_preceding_positive_peaks_)peak=NAN;
   for(auto& ms:negative_preceding_positive_peak_ms_)ms=0;
   for(auto& branch:span_positive_branch_)branch=0;
@@ -2942,6 +2945,7 @@ void ExperimentRunner::processFootSpanCycle() {
   const PhaseNegativeDecision* negative=nullptr;
   const SpanPositiveDecision* positive=nullptr;
   const SpanPositiveContext* positive_context=nullptr;
+  unsigned positive_index=0;
   float plus_peak=NAN;
   uint32_t plus_peak_ms=0;
   uint8_t positive_branch=0;
@@ -2957,7 +2961,7 @@ void ExperimentRunner::processFootSpanCycle() {
   for(unsigned i=0;i<8;++i) {
     const auto& d=span_positive_decisions_[i];
     if(d.ms>span.start_ms && d.ms<span.end_ms) {
-      positive=&d;positive_context=&span_positive_context_[i];positive_branch=span_positive_branch_[i];++positives;
+      positive=&d;positive_context=&span_positive_context_[i];positive_branch=span_positive_branch_[i];positive_index=i;++positives;
     }
   }
   foot_span_control::Cycle cycle;
@@ -3016,7 +3020,10 @@ void ExperimentRunner::processFootSpanCycle() {
       std::isfinite(cycle.positive_rpm) && std::isfinite(cycle.target_mj) &&
       plus_peak_ms>cycle.start_ms && negative && plus_peak_ms<negative->ms && plus_peak_ms<cycle.end_ms;
   long_foot_balance_.observe(cycle.start_ms,cycle.end_ms,cycle.left,cycle.right,
-      plus_peak,cycle.negative_peak,observable,hardware_healthy);
+      plus_peak,cycle.negative_peak,observable,hardware_healthy,
+      positives==1 && positive && positive->executed &&
+      foot_trial_effective_[positive_index] &&
+      foot_trial_generation_[positive_index]==long_foot_balance_.trialGeneration());
 }
 void ExperimentRunner::recordFootPhasePeak(int8_t physical_side,uint32_t peak_ms,float amplitude_deg) {
   foot_balance_.peak(physical_side,peak_ms);
@@ -3636,6 +3643,7 @@ bool ExperimentRunner::tryTiltPriorityRescue(
 
 bool ExperimentRunner::tryTiltPriorityImpl(
     PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,uint32_t t_test_ms,bool* healthy_out) {
+  foot_trial_pending_ms_=0;foot_trial_pending_effective_=false;
   tilt_priority::Input in;
   in.now_ms=t_test_ms;in.preset_deg=event.target_peak_deg;
   in.target_deg=tilt_priority_.target();in.next_side=event.physical_next_peak_side;
@@ -3663,6 +3671,7 @@ bool ExperimentRunner::tryTiltPriorityImpl(
   bool foot_candidate_eligible=false;
   bool foot_path_active=false;
   uint16_t foot_guarded_current=0,foot_guarded_candidate=0;
+  uint16_t foot_reference_baseline=0,foot_reference_cap=0;
   const auto wheel_guard_before=wheel_cycle_guard_;
   if(!stall_rescue_event_ && !choice.coast && in.next_side>0 &&
       choice.width_ms<=100 && tilt_priority_.target()>=6.f) {
@@ -3672,6 +3681,7 @@ bool ExperimentRunner::tryTiltPriorityImpl(
     const uint16_t exploratory_cap=static_cast<uint16_t>(baseline+20u);
     if(cap>exploratory_cap)cap=exploratory_cap;
     if(cap>100)cap=100;
+    foot_reference_baseline=baseline;foot_reference_cap=cap;
     const uint16_t proposed=long_foot_balance_.propose(t_test_ms,baseline,cap,in.hardware_healthy);
     const uint16_t current=long_foot_balance_.current(baseline,cap);
     auto ordinary_guard=wheel_guard_before;
@@ -3735,6 +3745,26 @@ bool ExperimentRunner::tryTiltPriorityImpl(
   if(stall_rescue_event_ && !choice.coast)weak_side_assist_.interrupt();
   tilt_priority_.confirm(in.next_side,t_test_ms,choice,true);
   if(foot_candidate_eligible)long_foot_balance_.confirm(t_test_ms,foot_guarded_current,foot_guarded_candidate,!choice.coast);
+  if(foot_path_active && !choice.coast && long_foot_balance_.trialActive()) {
+    // confirm can begin a new trial. Resolve its *confirmed* reference only
+    // afterward, using the exact guard history from before this command.
+    int reference=static_cast<int>(foot_reference_baseline)+long_foot_balance_.trialReferenceOffset();
+    if(reference<0)reference=0;
+    if(reference>foot_reference_cap)reference=foot_reference_cap;
+    auto reference_guard=wheel_guard_before;
+    const uint16_t foot_guarded_reference=reference_guard.limit(in.next_side,event.pre_input_wheel_speed_rpm,
+        in.hardware_healthy,t_test_ms,static_cast<uint16_t>(reference));
+    const int expected=long_foot_balance_.offset()-long_foot_balance_.trialReferenceOffset();
+    const int delivered=static_cast<int>(choice.width_ms)-static_cast<int>(foot_guarded_reference);
+    foot_trial_pending_ms_=t_test_ms;foot_trial_pending_generation_=long_foot_balance_.trialGeneration();
+    foot_trial_pending_effective_=delivered>=-5 && delivered<=5 &&
+        ((expected>0 && delivered>0) || (expected<0 && delivered<0));
+    // Reuse the inactive 1.0.88 weak-probe fields: metadata identifies them
+    // as the guarded trial-reference and accepted width in this version.
+    event.weak_probe_baseline_ms=static_cast<uint8_t>(foot_guarded_reference);
+    event.weak_probe_requested_ms=static_cast<uint8_t>(choice.width_ms);
+    event.weak_probe_executed=foot_trial_pending_effective_;
+  }
   event.valid=true;event.output_executed=!choice.coast;
   event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_selected,
       foot_adjusted && event.output_executed);
@@ -4080,6 +4110,10 @@ void ExperimentRunner::finishFootEnergyDecision(PsramLogger::EnergyControlAutono
       context.rpm=event.pre_input_wheel_speed_valid && event.pre_input_wheel_speed_age_us<=50000
           ? event.pre_input_wheel_speed_rpm : NAN;
       d.executed=event.output_executed;
+      foot_trial_generation_[span_positive_decision_next_]=
+          foot_trial_pending_ms_==t_ms && event.output_executed ? foot_trial_pending_generation_ : 0;
+      foot_trial_effective_[span_positive_decision_next_]=
+          foot_trial_pending_ms_==t_ms && event.output_executed && foot_trial_pending_effective_;
       span_positive_decision_next_=(span_positive_decision_next_+1)%8;
 
     }

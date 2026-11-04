@@ -9,6 +9,7 @@ class Controller {
  public:
   static constexpr unsigned kWindow=5;
   static constexpr uint32_t kMaxAgeMs=12000;
+  static constexpr uint32_t kProposalAgeMs=1500;
   static constexpr int kStepMs=5;
   static constexpr int kMaxOffsetMs=20;
   enum class State : uint8_t { Collect, Trial, Hold, Restore };
@@ -17,25 +18,36 @@ class Controller {
   unsigned samples()const{return n_;}
   int offset()const{return offset_;}
   int requestedOffset()const{return requested_;}
+  int trialReferenceOffset()const{return active_reference_;}
+  int proposedTrialReferenceOffset()const{return pending_ && state_!=State::Restore ? offset_ : active_reference_;}
+  uint32_t trialGeneration()const{return trial_generation_;}
+  bool trialActive()const{return state_==State::Trial || (state_==State::Hold && trial_generation_ && offset_!=active_reference_);}
   float error()const{return error_;}
   // 'valid' is an image-quality decision; a missing image is not zero swing.
   // 'healthy' is independent actuator/IMU/run safety, not an image miss.
-  void observe(uint32_t start,uint32_t now,float left,float right,float plus_peak,float minus_peak,bool valid,bool healthy) {
+  void observe(uint32_t start,uint32_t now,float left,float right,float plus_peak,float minus_peak,bool valid,bool healthy,bool trial_effective=true) {
     if(!healthy) {clearForSafety();return;}
     if(!now || start>=now || (changed_at_ && now<=changed_at_) ||
        !std::isfinite(plus_peak) || !std::isfinite(minus_peak) || plus_peak<=0 || minus_peak<=0)return;
     // A serious drop in either rocking peak must unwind without waiting for
     // a complete foot-response window. Existing emergency limits remain primary.
-    if((offset_!=0 || state_==State::Trial) && ref_plus_>0 && ref_minus_>0 &&
-       (plus_peak<ref_plus_*.65f || minus_peak<ref_minus_*.65f)) {
+    if((offset_!=0 || state_==State::Trial) && safety_plus_>0 && safety_minus_>0 &&
+       (plus_peak<safety_plus_*.65f || minus_peak<safety_minus_*.65f)) {
       if(offset_==0) {clearForSafety();return;}
       requested_=0;state_=State::Restore;pending_=true;clearSamples();return;
     }
     if(changed_at_ && start<=changed_at_)return;
     if(!valid || !std::isfinite(left) || !std::isfinite(right) || left<0 || right<0)return;
+    if(trialActive() && !trial_effective)return;
     if(last_sample_ && now<=last_sample_)return;
     if(last_sample_ && now-last_sample_>kMaxAgeMs)clearSamples();
     last_sample_=now;
+    // Keep the reference moving while an unsent proposal waits behind a
+    // guard. Freeze only at send time, never reuse an old startup window.
+    if(state_!=State::Trial && state_!=State::Restore) {
+      referenceSample(start,now,left,right,plus_peak,minus_peak);
+      return;
+    }
     if(pending_)return;
     if(n_ && (now<window_start_ || now-window_start_>kMaxAgeMs))clearSamples();
     if(!n_)window_start_=start;
@@ -50,22 +62,15 @@ class Controller {
     if(l+r<.3f) {clearSamples();return;}
     if(state_==State::Trial) {
       const float weak=right_weak_ ? r:l;
-      const bool better=std::fabs(e)+.02f<std::fabs(ref_error_) && weak>=ref_weak_+.05f &&
-        weak>=ref_weak_*1.05f && p>=ref_plus_*.85f && m>=ref_minus_*.85f;
+      // A rapidly changing body oscillation confounds the test. Neither
+      // credit nor reverse it; collect another complete response window.
+      if(p>ref_plus_*1.15f || m>ref_minus_*1.15f) {clearSamples();return;}
+      const float scale=(p+m)/(ref_plus_+ref_minus_);
+      const float normalized_weak=weak/scale;
+      const bool better=std::fabs(e)+.02f<std::fabs(ref_error_) && normalized_weak>=ref_weak_+.05f &&
+        normalized_weak>=ref_weak_*1.05f && p>=ref_plus_*.85f && m>=ref_minus_*.85f;
       if(!better) {requested_=previous_;state_=State::Restore;pending_=true;polarity_=-polarity_;clearSamples();return;}
-      state_=State::Hold;
-    }
-    // Deadband and bounded integral steps. Only an actual confirmed change
-    // starts the new observation period; no credit for a clipped proposal.
-    if(std::fabs(e)>.10f) {
-      const int sign=e>0.f ? 1 : -1;
-      if(decision_sign_ && sign!=decision_sign_)polarity_=-polarity_;
-      decision_sign_=sign;
-      const int next=offset_+polarity_*kStepMs;
-      if(next>=-kMaxOffsetMs && next<=kMaxOffsetMs) {
-        ref_error_=e;right_weak_=r<=l;ref_weak_=right_weak_?r:l;ref_plus_=p;ref_minus_=m;
-        previous_=offset_;requested_=next;pending_=true;proposal_at_=now;
-      }
+      state_=State::Hold;clearSamples();clearReference();return;
     }
     clearSamples();
   }
@@ -77,11 +82,16 @@ class Controller {
     }
     if(state_==State::Trial && changed_at_ &&
        (now<changed_at_ || now-changed_at_>kMaxAgeMs)) {
-      clearForSafety();return baseline;
+      // Healthy, recent observations with inconclusive response are not a
+      // sensor failure. Revert to the last accepted setting, without
+      // misclassifying the exploration direction as good or bad.
+      requested_=previous_;pending_=true;state_=State::Restore;clearSamples();
     }
     if(pending_ && state_!=State::Restore && proposal_at_ &&
-       (now<proposal_at_ || now-proposal_at_>kMaxAgeMs)) {
-      requested_=offset_;pending_=false;state_=State::Collect;clearSamples();
+       (now<proposal_at_ || now-proposal_at_>kProposalAgeMs)) {
+      requested_=offset_;pending_=false;
+      state_=trial_generation_ && offset_!=active_reference_ ? State::Hold : State::Collect;
+      clearSamples();
     }
     const int delta=pending_?requested_:offset_;
     int out=static_cast<int>(baseline)+delta;
@@ -102,7 +112,12 @@ class Controller {
     if(state_==State::Restore) {
       if((requested_>offset_ && actual<current_guarded) ||
          (requested_<offset_ && actual>current_guarded))return;
-      offset_=requested_;pending_=false;state_=State::Collect;changed_at_=now;clearSamples();
+      const bool reinstate=previous_active_ && requested_==previous_ && requested_!=0;
+      offset_=requested_;pending_=false;changed_at_=now;++trial_generation_;
+      if(reinstate){active_reference_=previous_active_reference_;state_=State::Hold;
+        safety_plus_=previous_safety_plus_;safety_minus_=previous_safety_minus_;}
+      else {active_reference_=offset_;state_=State::Collect;}
+      clearSamples();clearReference();
       return;
     }
     // A candidate clipped to the same guarded command is no experiment.
@@ -110,16 +125,60 @@ class Controller {
        (requested_<offset_ && actual>=current_guarded))return;
     const int actual_change=static_cast<int>(actual)-static_cast<int>(current_guarded);
     if(actual_change>kStepMs || actual_change< -kStepMs)return;
-    offset_=requested_;pending_=false;state_=State::Trial;changed_at_=now;clearSamples();
+    previous_active_=trialActive();previous_active_reference_=active_reference_;
+    previous_safety_plus_=safety_plus_;previous_safety_minus_=safety_minus_;
+    active_reference_=previous_;safety_plus_=ref_plus_;safety_minus_=ref_minus_;
+    offset_=requested_;pending_=false;state_=State::Trial;changed_at_=now;++trial_generation_;clearSamples();clearReference();
   }
  private:
+  struct Observation { uint32_t start=0,end=0;float left=0,right=0,plus=0,minus=0; };
+  void clearReference(){reference_count_=reference_next_=0;}
+  void referenceSample(uint32_t start,uint32_t now,float l,float r,float p,float m) {
+    Observation& item=reference_[reference_next_];
+    item.start=start;item.end=now;item.left=l;item.right=r;item.plus=p;item.minus=m;
+    reference_next_=(reference_next_+1)%kWindow;
+    if(reference_count_<kWindow)++reference_count_;
+    n_=reference_count_;
+    if(reference_count_<kWindow)return;
+    const Observation& oldest=reference_[reference_next_];
+    if(now<oldest.start || now-oldest.start>kMaxAgeMs) {
+      // Keep only the latest point, so invalid/missing periods are not zero.
+      Observation latest=item;clearReference();reference_[0]=latest;
+      reference_count_=1;reference_next_=1;n_=1;pending_=false;return;
+    }
+    float sl=0,sr=0,sp=0,sm=0,minp=p,maxp=p,minm=m,maxm=m;
+    for(unsigned i=0;i<kWindow;++i){const Observation& x=reference_[i];
+      sl+=x.left;sr+=x.right;sp+=x.plus;sm+=x.minus;
+      if(x.plus<minp)minp=x.plus;
+      if(x.plus>maxp)maxp=x.plus;
+      if(x.minus<minm)minm=x.minus;
+      if(x.minus>maxm)maxm=x.minus;
+    }
+    const float avgp=sp/kWindow,avgm=sm/kWindow;
+    // Avoid a startup-growth window, without demanding identical RPM.
+    if(maxp-minp>avgp*.35f || maxm-minm>avgm*.35f) {pending_=false;return;}
+    const float e=(sl-sr)/(sl+sr+.1f*kWindow);error_=e;
+    if((sl+sr)/kWindow<.3f || std::fabs(e)<=.10f) {pending_=false;state_=State::Hold;return;}
+    const int sign=e>0.f?1:-1;
+    if(decision_sign_ && sign!=decision_sign_)polarity_=-polarity_;
+    decision_sign_=sign;
+    const int next=offset_+polarity_*kStepMs;
+    if(next< -kMaxOffsetMs || next>kMaxOffsetMs){pending_=false;return;}
+    ref_error_=e;right_weak_=sr<=sl;ref_weak_=(right_weak_?sr:sl)/kWindow;
+    ref_plus_=avgp;ref_minus_=avgm;previous_=offset_;requested_=next;
+    pending_=true;proposal_at_=now;
+  }
   void clearSamples(){n_=0;window_start_=0;left_sum_=right_sum_=plus_sum_=minus_sum_=0;}
   void clearForSafety(){*this=Controller{};}
   uint32_t last_sample_=0,changed_at_=0,proposal_at_=0,window_start_=0;unsigned n_=0;
+  uint32_t trial_generation_=0;
   float left_sum_=0,right_sum_=0,plus_sum_=0,minus_sum_=0,error_=0;
   float ref_error_=0,ref_weak_=0,ref_plus_=0,ref_minus_=0;
-  int offset_=0,requested_=0,previous_=0,polarity_=1,decision_sign_=0;
-  bool pending_=false,right_weak_=false;
+  float safety_plus_=0,safety_minus_=0,previous_safety_plus_=0,previous_safety_minus_=0;
+  int offset_=0,requested_=0,previous_=0,active_reference_=0,polarity_=1,decision_sign_=0;
+  int previous_active_reference_=0;
+  bool pending_=false,right_weak_=false,previous_active_=false;
   State state_=State::Collect;
+  Observation reference_[kWindow];unsigned reference_count_=0,reference_next_=0;
 };
 }

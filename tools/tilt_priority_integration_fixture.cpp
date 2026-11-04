@@ -50,6 +50,8 @@ class ExperimentRunner {public:
  tilt_priority::Controller tilt_priority_;foot_span_control::Controller foot_span_control_;
  wheel_cycle_guard::Controller wheel_cycle_guard_;
  long_foot_balance::Controller long_foot_balance_;
+ uint32_t foot_trial_pending_ms_=0,foot_trial_pending_generation_=0;
+ bool foot_trial_pending_effective_=false;
  Resettable weak_side_assist_,walking_loss_feedback_,walking_low_speed_guard_;
  Adaptive adaptive_cg_;bool mode=true,begin_ok=true;unsigned calls=0;int sign=0,ma=0;uint16_t width=0;
  float run_cg_shift_mm_=0,pending_cg_shift_mm_=0,pending_target_energy_j_=NAN;
@@ -107,9 +109,12 @@ int main(){
   assert(r.tryTiltPriority(e,t));assert(e.output_executed && e.pulse_width_ms==65);
   assert(e.foot_span_baseline_ms==60 && e.foot_span_requested_ms==65);
   assert(e.foot_span_flags & Event::Span_selected);assert(r.long_foot_balance_.offset()==5);
+  assert(r.foot_trial_pending_effective_ && r.foot_trial_pending_ms_==t);
+  assert(r.foot_trial_pending_generation_==r.long_foot_balance_.trialGeneration());
   Event held;assert(r.tryTiltPriority(held,t+200));
   assert(held.pulse_width_ms==65 && held.foot_span_baseline_ms==60 && held.foot_span_requested_ms==65);
-  assert(held.foot_span_flags & Event::Span_selected);assert(r.long_foot_balance_.offset()==5);}
+  assert(held.foot_span_flags & Event::Span_selected);assert(r.long_foot_balance_.offset()==5);
+  assert(r.foot_trial_pending_effective_ && r.foot_trial_pending_generation_==r.long_foot_balance_.trialGeneration());}
  {ExperimentRunner r;auto t=prepare_foot(r);
   r.wheel_cycle_guard_.limit(-1,400.f,true,t-100,60);
   auto expected=r.wheel_cycle_guard_;assert(expected.limit(1,400.f,true,t,65)==49);
@@ -117,11 +122,54 @@ int main(){
   assert(r.tryTiltPriority(e,t));assert(e.output_executed && e.pulse_width_ms==49);
   assert(e.foot_span_baseline_ms==45 && e.foot_span_requested_ms==49);
   assert(e.foot_span_flags & Event::Span_selected);assert(r.long_foot_balance_.offset()==5);
+  assert(r.foot_trial_pending_effective_ && r.foot_trial_pending_generation_==r.long_foot_balance_.trialGeneration());
   assert(r.wheel_cycle_guard_.limit(-1,200.f,true,t+300,40)==expected.limit(-1,200.f,true,t+300,40));}
+ // A later observed cycle may have no intervention left after the timing
+ // cap, even though the controller still holds its previously sent offset.
+ // Such a cycle is recorded, but cannot serve as post-trial evidence.
+ {ExperimentRunner r;auto t=prepare_foot(r);Event first;
+  assert(r.tryTiltPriority(first,t));assert(r.foot_trial_pending_effective_);
+  tilt_priority::Choice coast;coast.selected=true;coast.coast=true;coast.direction=1;coast.target_deg=6;
+  r.tilt_priority_.crossing(1,t+200);r.tilt_priority_.confirm(1,t+200,coast,true);
+  r.tilt_priority_.peak(1,t+285,3.f);
+  Event clipped;assert(r.tryTiltPriority(clipped,t+300));assert(clipped.output_executed);
+  assert(r.long_foot_balance_.trialActive());
+  assert(clipped.weak_probe_baseline_ms==clipped.weak_probe_requested_ms);
+  assert(!r.foot_trial_pending_effective_ && !clipped.weak_probe_executed);}
+ // A second trial compares +10 against the already accepted +5, not against
+ // ordinary 0. No post-confirm generation may reuse the older reference.
+ {ExperimentRunner r;auto t=prepare_foot(r);Event first;
+  assert(r.tryTiltPriority(first,t));const auto first_generation=r.long_foot_balance_.trialGeneration();
+  for(int i=0;i<5;++i){const uint32_t ms=t+500+i*300;
+   r.long_foot_balance_.observe(ms-100,ms,3.f,1.5f,6.f,5.f,true,true,true);}
+  assert(r.long_foot_balance_.state()==long_foot_balance::Controller::State::Hold);
+  for(int i=0;i<5;++i){const uint32_t ms=t+2200+i*300;
+   r.long_foot_balance_.observe(ms-100,ms,3.f,1.5f,6.f,5.f,true,true,true);}
+  const uint32_t t2=t+3700;r.tilt_priority_.peak(-1,t2-50,3.f);
+  Event second;assert(r.tryTiltPriority(second,t2));assert(second.output_executed);
+  assert(r.long_foot_balance_.trialGeneration()!=first_generation);
+  assert(r.long_foot_balance_.trialReferenceOffset()==5 && r.long_foot_balance_.offset()==10);
+  assert(second.weak_probe_baseline_ms==65 && second.weak_probe_requested_ms==70);
+  assert(r.foot_trial_pending_effective_ && r.foot_trial_pending_generation_==r.long_foot_balance_.trialGeneration());}
+ {ExperimentRunner r;auto t=prepare_foot(r);Event first;
+  assert(r.tryTiltPriority(first,t));const auto gen=r.long_foot_balance_.trialGeneration();
+  for(int i=0;i<5;++i){const uint32_t ms=t+500+i*300;
+   r.long_foot_balance_.observe(ms-100,ms,3.f,1.5f,6.f,5.f,true,true,true);}
+  for(int i=0;i<5;++i){const uint32_t ms=t+2200+i*300;
+   r.long_foot_balance_.observe(ms-100,ms,3.f,1.5f,6.f,5.f,true,true,true);}
+  const uint32_t t2=t+3700;r.tilt_priority_.peak(-1,t2-140,3.f);
+  tilt_priority::Choice coast;coast.selected=true;coast.coast=true;coast.direction=1;coast.target_deg=6;
+  r.tilt_priority_.crossing(1,t2-100);r.tilt_priority_.confirm(1,t2-100,coast,true);
+  r.tilt_priority_.peak(1,t2-15,3.f);
+  Event blocked;assert(r.tryTiltPriority(blocked,t2));assert(blocked.output_executed);
+  assert(r.long_foot_balance_.trialGeneration()==gen && r.long_foot_balance_.offset()==5);
+  assert(blocked.weak_probe_baseline_ms==blocked.weak_probe_requested_ms);
+  assert(!r.foot_trial_pending_effective_ && !blocked.weak_probe_executed);}
  {ExperimentRunner r;auto t=prepare_foot(r);r.begin_ok=false;Event e;
   r.wheel_cycle_guard_.limit(-1,300.f,true,t-100,60);auto untouched=r.wheel_cycle_guard_;
   assert(r.tryTiltPriority(e,t));assert(!e.output_executed && !(e.foot_span_flags & Event::Span_selected));
   assert(r.long_foot_balance_.offset()==0);
+  assert(!r.foot_trial_pending_effective_ && r.foot_trial_pending_ms_==0);
   assert(r.wheel_cycle_guard_.limit(1,300.f,true,t+100,60)==untouched.limit(1,300.f,true,t+100,60));}
  {ExperimentRunner r;auto t=prepare_foot(r);
   tilt_priority::Choice coast;coast.selected=true;coast.coast=true;coast.direction=1;coast.target_deg=6;
