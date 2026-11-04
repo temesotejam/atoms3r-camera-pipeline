@@ -14,9 +14,19 @@ end='\nbool ExperimentRunner::tryWeakSideAssist('
 assert runner.count(start)==1 and runner.count(end)==1
 method=start+runner.split(start,1)[1].split(end,1)[0]
 at_zero=runner.split('void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(',1)[1]
-assert at_zero.index('tryTiltPriority(event,t_test_ms)') < at_zero.index('work_choice=chooseWheelWork(')
-branch=at_zero.split('if(work_mode && event.target_peak_deg==8.f && tryTiltPriority(event,t_test_ms)) {',1)[1].split('}',1)[0]
-assert 'if(!event.output_executed)rearm_for_next_peak();' in branch and 'return;' in branch
+assert at_zero.index('dispatchTiltPriority(event,t_test_ms,previous_accepted_valid,previous_accepted_ms)') < at_zero.index('work_choice=chooseWheelWork(')
+branch=runner.split('bool ExperimentRunner::dispatchTiltPriority(',1)[1].split('\n__attribute__((noinline)) void ExperimentRunner::finishSolverAudit(',1)[0]
+assert 'tryTiltPriority(event,t_test_ms)' in branch
+assert 'if(!event.output_executed)' in branch and 'resetEnergyControlAutonomousPeakTracker(true)' in branch
+assert branch.count('restoreUnsentStallRescue(event,previous_accepted_valid,previous_accepted_ms)')==2
+restore=runner.split('void ExperimentRunner::restoreUnsentStallRescue(',1)[1].split('\n__attribute__((noinline)) bool ExperimentRunner::dispatchTiltPriority(',1)[0]
+assert 'energy_control_autonomous_zero_cross_consumed_for_peak_=false' in restore
+assert 'energy_control_autonomous_last_accepted_zero_cross_ms_=previous_accepted_ms' in restore
+assert 'EnergyControlAutonomousHalfCycleState::WAIT_ZERO_CROSS' in restore
+assert 'stall_rescue_attempted_peak_ms_!=energy_control_autonomous_last_peak_ms_' in runner
+audit=at_zero.split('auto finish_audit =',1)[1].split('solver_audit::ScopeExit',1)[0]
+assert audit.index('const uint32_t end_us=micros()') < audit.index('finishSolverAudit(audit,event,end_us)')
+assert 'audit.end_us = end_us' in runner and 'logger_->addSolverAuditEvent(audit)' in runner
 assert 'energy_control_autonomous_pending_probe_=true' in method
 assert 'energy_control_autonomous_pending_model_energy_j_=NAN' in method
 assert 'event.work_control_branch=15' in method

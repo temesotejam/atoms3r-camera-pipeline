@@ -34,6 +34,8 @@ g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_trend.cpp -o /tmp
 /tmp/test_foot_trend
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_recent_gate.cpp -o /tmp/test_foot_recent_gate
 /tmp/test_foot_recent_gate
+g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_stall_rescue.cpp -o /tmp/test_stall_rescue
+/tmp/test_stall_rescue
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_trend_integration.cpp -o /tmp/test_foot_trend_integration
 /tmp/test_foot_trend_integration
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_split.cpp -o /tmp/test_foot_split

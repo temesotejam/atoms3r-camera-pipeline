@@ -1,6 +1,6 @@
 {
   "name": "AtomS3R Lateral Energy Control",
-  "version": "1.0.85-foot-yaw-observe",
+  "version": "1.0.86-centered-return",
   "new_install_improv_wait_time": 0,
   "builds": [
     {

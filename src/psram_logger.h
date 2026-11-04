@@ -333,7 +333,7 @@ class PsramLogger {
   struct EnergyControlAutonomousZeroCrossEvent {
     float cg_shift_mm = 0;
     uint16_t event_index = 0;
-    uint8_t event_kind = 0;  // 0=energy_control_zero_cross, 1=strong_start_kick.
+    uint8_t event_kind = 0;  // 0=zero_cross, 1=start_kick, 2=inward_stall_rescue.
     uint32_t zero_cross_time_ms = 0;
     float zero_cross_rate_dps = NAN;
     float zero_cross_abs_rate_dps = NAN;
@@ -768,7 +768,3 @@ private:
   bool ready_ = false;
   const char* last_error_ = "not_initialized";
 };
-
-
-
-

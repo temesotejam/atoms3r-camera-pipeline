@@ -1415,6 +1415,7 @@ void ExperimentRunner::recordV59StateGateEvent(uint32_t crossing_ms, float hprev
 }
 
 void ExperimentRunner::beginStartSync(uint32_t now_ms) {
+  stall_rescue_detector_.reset();stall_rescue_attempted_peak_ms_=0;stall_rescue_event_=false;
   // Amplitude only: relative heading is a diagnostic, never a target.
   energy_control_autonomous_pending_target_deg_ = NAN;
   status_.steering = steering::disabledSnapshot();
@@ -3143,6 +3144,32 @@ bool ExperimentRunner::recordEnergyControlAutonomousPeak(uint32_t peak_ms, int8_
     recordFootPhasePeak(physical_side,peak_ms,amplitude_deg);
   return true;
 }
+__attribute__((noinline)) bool ExperimentRunner::observeInwardStallRescue(
+    uint32_t t_test_ms,bool physical_event_suppressed,
+    bool peak_just_confirmed,float angle_deg,float rate_dps) {
+  const int8_t peak_side=energy_control_autonomous_last_peak_side_;
+  const bool scope=wheelWorkMode() && energy_control_autonomous_target_peak_deg_==8.f &&
+      energy_control_autonomous_input_peak_percent_==0 && peak_side==1 &&
+      energy_control_autonomous_last_peak_valid_ && !physical_event_suppressed &&
+      energy_control_autonomous_half_cycle_state_==EnergyControlAutonomousHalfCycleState::WAIT_ZERO_CROSS &&
+      !energy_control_autonomous_zero_cross_consumed_for_peak_ && !peak_just_confirmed &&
+      stall_rescue_attempted_peak_ms_!=energy_control_autonomous_last_peak_ms_;
+  if(!scope) {stall_rescue_detector_.reset();return false;}
+  return stall_rescue_detector_.observe(t_test_ms,energy_control_autonomous_previous_detector_test_ms_,
+      energy_control_autonomous_last_peak_ms_,energy_control_autonomous_last_peak_amplitude_deg_,
+      energy_control_autonomous_previous_detector_relative_angle_deg_,angle_deg,
+      energy_control_autonomous_previous_detector_rate_dps_,rate_dps);
+}
+
+__attribute__((noinline)) void ExperimentRunner::acceptMotionCrossing(bool rescue,uint32_t t_test_ms,
+    float rate,float before,float after,float alpha,float interpolated_time_ms) {
+  stall_rescue_event_=rescue;
+  if(rescue)stall_rescue_attempted_peak_ms_=energy_control_autonomous_last_peak_ms_;
+  updateEnergyControlAutonomousAtZeroCross(t_test_ms,rate,before,after,alpha,interpolated_time_ms);
+  stall_rescue_event_=false;
+  stall_rescue_detector_.reset();
+}
+
 void ExperimentRunner::updateEnergyControlAutonomousMotion(uint32_t now_ms) {
   if (!energy_control_autonomous_mode_ ||
       energy_control_autonomous_phase_ == EnergyControlAutonomousPhase::IDLE ||
@@ -3195,9 +3222,8 @@ void ExperimentRunner::updateEnergyControlAutonomousMotion(uint32_t now_ms) {
   const int8_t peak_side = energy_control_autonomous_last_peak_side_;
   float threshold_deg = peak_side * energy_control_autonomous_last_peak_amplitude_deg_ *
       (energy_control_autonomous_input_peak_percent_ * 0.01f);
-  if(wheelWorkMode() && energy_control_autonomous_target_peak_deg_==8.f &&
-     energy_control_autonomous_input_peak_percent_==0 && peak_side==1)
-    threshold_deg=tilt_priority_.negativeEarlyThreshold(t_test_ms,peak_side);
+  // Normal 0% timing stays at centre even if asymmetry grows. The former
+  // increasingly early input is not supported by a measured response.
   const bool peak_just_confirmed = was_waiting_for_peak &&
       energy_control_autonomous_half_cycle_state_ == EnergyControlAutonomousHalfCycleState::WAIT_ZERO_CROSS;
   // At 100% (or a threshold already passed during peak confirmation), fire
@@ -3209,7 +3235,9 @@ void ExperimentRunner::updateEnergyControlAutonomousMotion(uint32_t now_ms) {
   const bool crossing = rate_dps * peak_side < 0.0f &&
       ((peak_side < 0 && before_deg < threshold_deg && detector_relative_angle_deg >= threshold_deg) ||
        (peak_side > 0 && before_deg > threshold_deg && detector_relative_angle_deg <= threshold_deg));
-  if (!physical_event_suppressed && (crossing || confirmation_input) &&
+  const bool rescue=observeInwardStallRescue(t_test_ms,physical_event_suppressed,
+      peak_just_confirmed,detector_relative_angle_deg,rate_dps);
+  if (!physical_event_suppressed && (crossing || confirmation_input || rescue) &&
       energy_control_autonomous_half_cycle_state_ == EnergyControlAutonomousHalfCycleState::WAIT_ZERO_CROSS &&
       (energy_control_autonomous_phase_ == EnergyControlAutonomousPhase::ENERGY_CONTROL ||
        energy_control_autonomous_phase_ == EnergyControlAutonomousPhase::HOLD) &&
@@ -3222,8 +3250,8 @@ void ExperimentRunner::updateEnergyControlAutonomousMotion(uint32_t now_ms) {
         alpha * static_cast<float>(t_test_ms - energy_control_autonomous_previous_detector_test_ms_);
     const float interpolated_rate_dps = energy_control_autonomous_previous_detector_rate_dps_ +
         alpha * (rate_dps - energy_control_autonomous_previous_detector_rate_dps_);
-    updateEnergyControlAutonomousAtZeroCross(t_test_ms, interpolated_rate_dps, before_deg,
-        detector_relative_angle_deg, alpha, interpolated_time_ms);
+    acceptMotionCrossing(rescue,t_test_ms,interpolated_rate_dps,before_deg,
+        detector_relative_angle_deg,alpha,interpolated_time_ms);
   }
   const bool passed_centre_inward = rate_dps * peak_side < 0.0f &&
       ((peak_side < 0 && before_deg < 0 && detector_relative_angle_deg >= 0) ||
@@ -3553,11 +3581,32 @@ bool ExperimentRunner::prepareUnmodeledWalkCoast(
 
 bool ExperimentRunner::tryTiltPriority(
     PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,uint32_t t_test_ms) {
+  if(!stall_rescue_event_)return tryTiltPriorityImpl(event,t_test_ms,nullptr);
+  return tryTiltPriorityRescue(event,t_test_ms);
+}
+
+bool ExperimentRunner::tryTiltPriorityRescue(
+    PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,uint32_t t_test_ms) {
+  // Only speculative rescue attempts pay for snapshots. A failed ordinary
+  // pulse keeps the established runner behavior and hot-path cost.
+  const auto rescue_tilt_before=tilt_priority_;
+  const auto rescue_wheel_before=wheel_cycle_guard_;
+  bool healthy=false;
+  const bool selected=tryTiltPriorityImpl(event,t_test_ms,&healthy);
+  if(healthy && !event.output_executed) {
+    tilt_priority_=rescue_tilt_before;
+    wheel_cycle_guard_=rescue_wheel_before;
+  }
+  return selected;
+}
+
+bool ExperimentRunner::tryTiltPriorityImpl(
+    PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,uint32_t t_test_ms,bool* healthy_out) {
   tilt_priority::Input in;
   in.now_ms=t_test_ms;in.preset_deg=event.target_peak_deg;
   in.target_deg=tilt_priority_.target();in.next_side=event.physical_next_peak_side;
   in.crossing_rate_dps=event.zero_cross_abs_rate_dps;
-  in.hardware_cap_ms=Config::WALKING_TARGET8_MAX_PULSE_MS;
+  in.hardware_cap_ms=stall_rescue_event_ ? stall_rescue::kMaxPulseMs : Config::WALKING_TARGET8_MAX_PULSE_MS;
   in.hardware_healthy=wheelWorkMode() && !status_.emergency_stop &&
       status_.state==ExperimentState::RUNNING_BATCH_SWEEP && !status_.pulse_active &&
       roller_ && roller_->ok() && imu_ && imu_->acquisitionHealthy() && !imu_->stale(millis()) &&
@@ -3565,8 +3614,10 @@ bool ExperimentRunner::tryTiltPriority(
       std::isfinite(event.zero_cross_abs_rate_dps) && event.zero_cross_abs_rate_dps>0.f &&
       event.pre_input_wheel_speed_valid && event.pre_input_wheel_speed_age_us<=50000 &&
       std::isfinite(event.pre_input_wheel_speed_rpm);
+  if(healthy_out)*healthy_out=in.hardware_healthy;
   if(!in.hardware_healthy) wheel_cycle_guard_.reset();
   auto choice=tilt_priority_.propose(in);
+  if(stall_rescue_event_ && (!choice.selected || choice.coast))return false;
   // Record every accepted healthy crossing, even when ordinary control is
   // selected. It will be paired with the corresponding measured peak.
   if(in.hardware_healthy)tilt_priority_.crossing(in.next_side,t_test_ms);
@@ -3575,7 +3626,7 @@ bool ExperimentRunner::tryTiltPriority(
   // positive-side pulse, retaining the hardware and historical timing caps.
   // Actual sent commands, complete cycles and matched negative-side context
   // are required by foot_span_control before any outcome is evaluated.
-  weak_side_assist_.interrupt();
+  if(!stall_rescue_event_)weak_side_assist_.interrupt();
   bool foot_adjusted=false;
   if(!choice.coast && in.next_side>0 && choice.width_ms<=100 && tilt_priority_.target()>=6.f) {
     foot_span_control_.preferHighCurrentFirst();
@@ -3646,6 +3697,7 @@ bool ExperimentRunner::tryTiltPriority(
     event.reason=Config::ENERGY_CONTROL_AUTONOMOUS_REASON_CURRENT_WRITE_FAILED;
     return true;
   }
+  if(stall_rescue_event_ && !choice.coast)weak_side_assist_.interrupt();
   tilt_priority_.confirm(in.next_side,t_test_ms,choice,true);
   event.valid=true;event.output_executed=!choice.coast;
   event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_selected,
@@ -4067,51 +4119,44 @@ void ExperimentRunner::finishFootEnergyDecision(PsramLogger::EnergyControlAutono
   logger_->addEnergyControlAutonomousZeroCrossEvent(event);
 }
 
-void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(uint32_t t_test_ms, float rate_dps,
-                                                                  float detector_before_deg,
-                                                                  float detector_after_deg,
-                                                                  float crossing_alpha,
-                                                                  float interpolated_time_ms) {
-  if (!energy_control_autonomous_mode_ || !logger_ || status_.pulse_active ||
-      (energy_control_autonomous_phase_ != EnergyControlAutonomousPhase::ENERGY_CONTROL &&
-       energy_control_autonomous_phase_ != EnergyControlAutonomousPhase::HOLD) ||
-      energy_control_autonomous_half_cycle_state_ !=
-          EnergyControlAutonomousHalfCycleState::WAIT_ZERO_CROSS ||
-      !energy_control_autonomous_last_peak_valid_ ||
-      energy_control_autonomous_zero_cross_consumed_for_peak_) return;
-  const uint32_t accepted_cross_ms = static_cast<uint32_t>(lroundf(interpolated_time_ms));
-  if (energy_control_autonomous_last_accepted_zero_cross_valid_ &&
-      static_cast<uint32_t>(accepted_cross_ms - energy_control_autonomous_last_accepted_zero_cross_ms_) <
-          Config::ENERGY_CONTROL_AUTONOMOUS_MIN_HALF_CYCLE_MS) return;
-  if (logger_->energyControlAutonomousEventCapacityReached()) {
-    logger_->markEnergyControlAutonomousEventOverflow();
+__attribute__((noinline)) void ExperimentRunner::restoreUnsentStallRescue(
+    PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
+    bool previous_accepted_valid,uint32_t previous_accepted_ms) {
+  logger_->addEnergyControlAutonomousZeroCrossEvent(event);
+  energy_control_autonomous_last_accepted_zero_cross_valid_=previous_accepted_valid;
+  energy_control_autonomous_last_accepted_zero_cross_ms_=previous_accepted_ms;
+  energy_control_autonomous_zero_cross_consumed_for_peak_=false;
+  if(!status_.emergency_stop)
+    energy_control_autonomous_half_cycle_state_=EnergyControlAutonomousHalfCycleState::WAIT_ZERO_CROSS;
+}
+
+__attribute__((noinline)) bool ExperimentRunner::dispatchTiltPriority(
+    PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,uint32_t t_test_ms,
+    bool previous_accepted_valid,uint32_t previous_accepted_ms) {
+  if(event.target_peak_deg==8.f && wheelWorkMode() && tryTiltPriority(event,t_test_ms)) {
+    if(stall_rescue_event_ && !event.output_executed) {
+      restoreUnsentStallRescue(event,previous_accepted_valid,previous_accepted_ms);
+      return true;
+    }
+    finishFootEnergyDecision(event,t_test_ms);
+    if(!event.output_executed) {
+      energy_control_autonomous_half_cycle_state_=EnergyControlAutonomousHalfCycleState::WAIT_PEAK;
+      resetEnergyControlAutonomousPeakTracker(true);
+    }
+    return true;
   }
-  // One accepted peak owns one following accepted central passage. Do not arm
-  // the next peak tracker until a normal pulse has finished (or width is zero).
-  energy_control_autonomous_zero_cross_consumed_for_peak_ = true;
-  energy_control_autonomous_last_accepted_zero_cross_valid_ = true;
-  energy_control_autonomous_last_accepted_zero_cross_ms_ = accepted_cross_ms;
-  resetEnergyControlAutonomousPeakTracker(false);
-  auto rearm_for_next_peak = [this]() RW_SPEED_CODE {
-    energy_control_autonomous_half_cycle_state_ = EnergyControlAutonomousHalfCycleState::WAIT_PEAK;
-    resetEnergyControlAutonomousPeakTracker(true);
-  };
-  const uint32_t v46l_decision_t0_us = micros();
-  control_latency::mark(control_latency::Decision);
-  PsramLogger::EnergyControlAutonomousZeroCrossEvent event;
-  // V46s audit begin
-  solver_audit::Record audit;
-  audit.t_test_ms = t_test_ms;
-  audit.start_us = v46l_decision_t0_us;
-  audit.pulse_id_before = status_.pulse_id;
-  audit.model_vbat_mV = status_.beta_model_vbat_mV;
-  audit.gyro_sequence = imu_->reading().gyro_sequence;
-  audit.sample_time_us = imu_->reading().last_gyro_update_us;
-  audit.sample_time_valid = audit.gyro_sequence != 0;
-  audit.entry_sample_age_us = audit.sample_time_valid ?
-      static_cast<uint32_t>(micros() - audit.sample_time_us) : 0;
-  auto finish_audit = [&]() RW_SPEED_CODE {
-    audit.end_us = micros();
+  if(stall_rescue_event_) {
+    event.valid=false;
+    event.reason=Config::ENERGY_CONTROL_AUTONOMOUS_REASON_VALID_NO_OUTPUT;
+    restoreUnsentStallRescue(event,previous_accepted_valid,previous_accepted_ms);
+    return true;
+  }
+  return false;
+}
+
+__attribute__((noinline)) void ExperimentRunner::finishSolverAudit(
+    solver_audit::Record& audit,const PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,uint32_t end_us) {
+    audit.end_us = end_us;
     audit.decision_us = static_cast<uint32_t>(audit.end_us - audit.start_us);
     audit.exit_sample_age_us = audit.sample_time_valid ?
         static_cast<uint32_t>(audit.end_us - audit.sample_time_us) : 0;
@@ -4137,6 +4182,57 @@ void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(uint32_t t_test_
       audit.solver_us = static_cast<uint32_t>(audit.solver_end_us - audit.solver_start_us);
     }
     logger_->addSolverAuditEvent(audit);
+}
+
+void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(uint32_t t_test_ms, float rate_dps,
+                                                                  float detector_before_deg,
+                                                                  float detector_after_deg,
+                                                                  float crossing_alpha,
+                                                                  float interpolated_time_ms) {
+  if (!energy_control_autonomous_mode_ || !logger_ || status_.pulse_active ||
+      (energy_control_autonomous_phase_ != EnergyControlAutonomousPhase::ENERGY_CONTROL &&
+       energy_control_autonomous_phase_ != EnergyControlAutonomousPhase::HOLD) ||
+      energy_control_autonomous_half_cycle_state_ !=
+          EnergyControlAutonomousHalfCycleState::WAIT_ZERO_CROSS ||
+      !energy_control_autonomous_last_peak_valid_ ||
+      energy_control_autonomous_zero_cross_consumed_for_peak_) return;
+  const uint32_t accepted_cross_ms = static_cast<uint32_t>(lroundf(interpolated_time_ms));
+  const bool previous_accepted_valid=energy_control_autonomous_last_accepted_zero_cross_valid_;
+  const uint32_t previous_accepted_ms=energy_control_autonomous_last_accepted_zero_cross_ms_;
+  if (energy_control_autonomous_last_accepted_zero_cross_valid_ &&
+      static_cast<uint32_t>(accepted_cross_ms - energy_control_autonomous_last_accepted_zero_cross_ms_) <
+          Config::ENERGY_CONTROL_AUTONOMOUS_MIN_HALF_CYCLE_MS) return;
+  if (logger_->energyControlAutonomousEventCapacityReached()) {
+    logger_->markEnergyControlAutonomousEventOverflow();
+  }
+  // One accepted peak owns one following accepted central passage. Do not arm
+  // the next peak tracker until a normal pulse has finished (or width is zero).
+  energy_control_autonomous_zero_cross_consumed_for_peak_ = true;
+  energy_control_autonomous_last_accepted_zero_cross_valid_ = true;
+  energy_control_autonomous_last_accepted_zero_cross_ms_ = accepted_cross_ms;
+  resetEnergyControlAutonomousPeakTracker(false);
+  auto rearm_for_next_peak = [this]() RW_SPEED_CODE {
+    energy_control_autonomous_half_cycle_state_ = EnergyControlAutonomousHalfCycleState::WAIT_PEAK;
+    resetEnergyControlAutonomousPeakTracker(true);
+  };
+  const uint32_t v46l_decision_t0_us = micros();
+  control_latency::mark(control_latency::Decision);
+  PsramLogger::EnergyControlAutonomousZeroCrossEvent event;
+  event.event_kind=stall_rescue_event_ ? 2 : 0;
+  // V46s audit begin
+  solver_audit::Record audit;
+  audit.t_test_ms = t_test_ms;
+  audit.start_us = v46l_decision_t0_us;
+  audit.pulse_id_before = status_.pulse_id;
+  audit.model_vbat_mV = status_.beta_model_vbat_mV;
+  audit.gyro_sequence = imu_->reading().gyro_sequence;
+  audit.sample_time_us = imu_->reading().last_gyro_update_us;
+  audit.sample_time_valid = audit.gyro_sequence != 0;
+  audit.entry_sample_age_us = audit.sample_time_valid ?
+      static_cast<uint32_t>(micros() - audit.sample_time_us) : 0;
+  auto finish_audit = [&]() RW_SPEED_CODE {
+    const uint32_t end_us=micros();
+    finishSolverAudit(audit,event,end_us);
   };
   solver_audit::ScopeExit<decltype(finish_audit)> audit_exit(finish_audit);
   // V46s audit end
@@ -4242,11 +4338,7 @@ void ExperimentRunner::updateEnergyControlAutonomousAtZeroCross(uint32_t t_test_
   // In the 8-degree walking experiment, lean amplitude takes priority over
   // the ordinary fitted selector and foot-span corrections. Existing sensor,
   // motor and emergency-stop checks still gate the experimental command.
-  if(work_mode && event.target_peak_deg==8.f && tryTiltPriority(event,t_test_ms)) {
-    finishFootEnergyDecision(event,t_test_ms);
-    if(!event.output_executed)rearm_for_next_peak();
-    return;
-  }
+  if(dispatchTiltPriority(event,t_test_ms,previous_accepted_valid,previous_accepted_ms))return;
   if(work_mode && event.target_peak_deg==8.f)
     wheel_speed_balance_.crossing(event.physical_next_peak_side,event.pre_input_wheel_speed_rpm,
         peak_error_adaptation::speedUsable(event.pre_input_wheel_speed_rpm,event.pre_input_wheel_speed_valid,event.pre_input_wheel_speed_age_us),t_test_ms);

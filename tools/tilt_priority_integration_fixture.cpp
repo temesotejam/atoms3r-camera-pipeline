@@ -1,5 +1,6 @@
 #define FOOT_TREND_CYCLES 2
 #include "tilt_priority.h"
+#include "stall_rescue.h"
 #include "wheel_cycle_guard.h"
 #include "foot_span_control.h"
 #include "peak_error_adaptation.h"
@@ -42,6 +43,7 @@ struct Roller {bool good=true;bool ok()const{return good;}};
 struct Resettable {int resets=0;void reset(){++resets;}void interrupt(){++resets;}};
 struct Adaptive {bool broken=false;void breakPair(){broken=true;}};
 class ExperimentRunner {public:
+ bool stall_rescue_event_=false;
  Status status_;Imu imu_obj;Roller roller_obj;Imu* imu_=&imu_obj;Roller* roller_=&roller_obj;
  tilt_priority::Controller tilt_priority_;foot_span_control::Controller foot_span_control_;
  wheel_cycle_guard::Controller wheel_cycle_guard_;
@@ -62,6 +64,8 @@ class ExperimentRunner {public:
    ++calls;sign=d;width=w;ma=m;return begin_ok;
  }
  bool tryTiltPriority(PsramLogger::EnergyControlAutonomousZeroCrossEvent&,uint32_t);
+ bool tryTiltPriorityImpl(PsramLogger::EnergyControlAutonomousZeroCrossEvent&,uint32_t,bool*);
+ bool tryTiltPriorityRescue(PsramLogger::EnergyControlAutonomousZeroCrossEvent&,uint32_t);
 };
 // METHOD_SOURCE
 using Event=PsramLogger::EnergyControlAutonomousZeroCrossEvent;
@@ -204,6 +208,21 @@ int main(){
   assert(!r.energy_control_autonomous_pending_peak_);
   r.tilt_priority_.peak(1,1190,1.f);
   assert(r.tilt_priority_.widthLimit(1)==60);}
+ // A failed rescue preserves the measured-controller history and must not
+ // interrupt the independent weak-side adaptation. The next ordinary
+ // decision matches an otherwise identical untouched runner.
+ {ExperimentRunner r,control; r.stall_rescue_event_=true;r.begin_ok=false;
+  Event trial;trial.physical_next_peak_side=-1;trial.zero_cross_abs_rate_dps=2;
+  assert(r.tryTiltPriority(trial,1000));
+  assert(!trial.output_executed && trial.reason==12 && r.weak_side_assist_.resets==0);
+  r.stall_rescue_event_=false;r.begin_ok=true;
+  Event a,b;a.physical_next_peak_side=b.physical_next_peak_side=-1;
+  assert(r.tryTiltPriority(a,1300) && control.tryTiltPriority(b,1300));
+  assert(a.output_executed && b.output_executed && a.pulse_width_ms==b.pulse_width_ms);
+  assert(r.tilt_priority_.widthLimit(-1)==control.tilt_priority_.widthLimit(-1));
+  assert(r.wheel_cycle_guard_.limit(1,300.f,true,1600,40)==
+         control.wheel_cycle_guard_.limit(1,300.f,true,1600,40));
+ }
  // Run 803's recorded 1858 ms crossing and immediately prior peak,
  // evaluated as an isolated hypothetical decision at the initial stage.
  {ExperimentRunner r;r.tilt_priority_.peak(1,1698,4.67317f);

@@ -43,6 +43,7 @@
 
 #include "experiment_status.h"
 #include "gyro_heading_diagnostic.h"
+#include "stall_rescue.h"
 
 class ExperimentRunner {
 public:
@@ -398,6 +399,18 @@ private:
   void RW_SPEED_CODE resetEnergyControlAutonomousPeakTracker(bool enable);
   void beginEnergyControlAutonomousStartKick(uint32_t now_ms);
   void RW_SPEED_CODE updateEnergyControlAutonomousMotion(uint32_t now_ms);
+  bool __attribute__((noinline)) observeInwardStallRescue(uint32_t t_test_ms,
+      bool physical_event_suppressed,bool peak_just_confirmed,float angle_deg,float rate_dps);
+  void __attribute__((noinline)) acceptMotionCrossing(bool rescue,uint32_t t_test_ms,
+      float interpolated_rate_dps,float before_deg,float after_deg,float alpha,float interpolated_time_ms);
+  void __attribute__((noinline)) restoreUnsentStallRescue(
+      PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
+      bool previous_accepted_valid,uint32_t previous_accepted_ms);
+  bool __attribute__((noinline)) dispatchTiltPriority(
+      PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,uint32_t t_test_ms,
+      bool previous_accepted_valid,uint32_t previous_accepted_ms);
+  void __attribute__((noinline)) finishSolverAudit(solver_audit::Record& audit,
+      const PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,uint32_t end_us);
   void RW_SPEED_CODE updateEnergyControlAutonomousPeakTracker(uint32_t now_ms,
                                                 float peak_relative_angle_deg,
                                                 float rate_dps);
@@ -438,6 +451,10 @@ private:
       PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
       const wheel_work_energy_control::Choice& normal,uint32_t t_test_ms);
   bool __attribute__((noinline)) tryTiltPriority(
+      PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,uint32_t t_test_ms);
+  bool __attribute__((noinline)) tryTiltPriorityImpl(
+      PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,uint32_t t_test_ms,bool* healthy_out);
+  bool __attribute__((noinline)) tryTiltPriorityRescue(
       PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,uint32_t t_test_ms);
   void __attribute__((noinline)) choosePeakMpc(PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
       float fast_v,wheel_work_energy_control::Choice& choice,int16_t& current,
@@ -819,5 +836,8 @@ private:
   foot_fullstride_observer::Observer foot_span_observer_;
   // Diagnostics are cold and must not change hot member offsets or control.
   GyroHeadingDiagnostic gyro_heading_diagnostic_;
+  stall_rescue::Detector stall_rescue_detector_;
+  uint32_t stall_rescue_attempted_peak_ms_=0;
+  bool stall_rescue_event_=false;
   bool gyro_heading_start_pending_ = false;
 };
