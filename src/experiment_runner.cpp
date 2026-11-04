@@ -3574,16 +3574,26 @@ bool ExperimentRunner::tryTiltPriority(
   // Apply after camera adjustments, so they cannot undo the wheel guard.
   // Coast observations also update the pair but never acquire a new pulse.
   const uint16_t before_wheel_guard=choice.width_ms;
+  // Recompute from the same history if a camera candidate is rejected. The
+  // guard mutates its wheel-pair state, so invoking it twice on the same
+  // instance would not evaluate the ordinary command under the same context.
+  const auto wheel_guard_before=wheel_cycle_guard_;
   choice.width_ms=wheel_cycle_guard_.limit(in.next_side,event.pre_input_wheel_speed_rpm,
       in.hardware_healthy,t_test_ms,choice.width_ms);
-  event.wheel_guard_legacy_ms=wheel_cycle_guard_.legacyWidth();
-  event.wheel_guard_extra_ms=wheel_cycle_guard_.extraReduction();
-  event.wheel_guard_trial_eligible=wheel_cycle_guard_.trialEligible();
   if(in.next_side>0 && choice.width_ms!=before_wheel_guard) {
+    if(foot_adjusted) {
+      wheel_cycle_guard_=wheel_guard_before;
+      choice.width_ms=wheel_cycle_guard_.limit(in.next_side,event.pre_input_wheel_speed_rpm,
+          in.hardware_healthy,t_test_ms,event.foot_span_baseline_ms);
+    }
     // A truncated camera candidate is not the candidate that was requested.
+    // Send the guarded ordinary baseline, never an untracked residual offset.
     (void)foot_span_control_.selectorUnavailable(t_test_ms);
     foot_adjusted=false;
   }
+  event.wheel_guard_legacy_ms=wheel_cycle_guard_.legacyWidth();
+  event.wheel_guard_extra_ms=wheel_cycle_guard_.extraReduction();
+  event.wheel_guard_trial_eligible=wheel_cycle_guard_.trialEligible();
   event.work_control_branch=15;event.energy_model_extrapolated=true;
   event.work_prediction_cross_condition=true;
   event.work_brake_cap_ms=choice.width_ms;

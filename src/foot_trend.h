@@ -12,11 +12,12 @@ struct Average {
   float left=NAN, right=NAN, negative_peak=NAN, error=NAN;
   uint32_t start_ms=0, end_ms=0;
 };
-class Window {
+template <unsigned N>
+class WindowT {
  public:
-  static constexpr unsigned kCycles=FOOT_TREND_CYCLES;
+  static constexpr unsigned kCycles=N;
   static_assert(kCycles>=2, "foot trend needs at least two cycles");
-  void reset() { *this=Window{}; }
+  void reset() { *this=WindowT{}; }
   // A bad or incomplete cycle discards history; a non-contiguous valid
   // cycle starts a new window with itself. end<=start is never usable.
   bool cycle(uint32_t start,uint32_t end,float left,float right,float peak,bool valid) {
@@ -47,4 +48,5 @@ class Window {
   struct Entry {uint32_t start=0,end=0;float left=0,right=0,peak=0,error=0;};
   Entry entries_[kCycles];unsigned next_=0,count_=0;uint32_t last_end_=0;
 };
+using Window=WindowT<FOOT_TREND_CYCLES>;
 }

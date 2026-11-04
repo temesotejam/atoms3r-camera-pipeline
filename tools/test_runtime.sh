@@ -34,6 +34,12 @@ g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_trend.cpp -o /tmp
 /tmp/test_foot_trend
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_trend_integration.cpp -o /tmp/test_foot_trend_integration
 /tmp/test_foot_trend_integration
+g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_split.cpp -o /tmp/test_foot_split
+/tmp/test_foot_split
+g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_once.cpp -o /tmp/test_foot_once
+/tmp/test_foot_once
+g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_once_edges.cpp -o /tmp/test_foot_once_edges
+/tmp/test_foot_once_edges
 python3 tools/test_foot_span_context_wiring.py
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_feedback_stress.cpp -o /tmp/test_foot_feedback_stress
 /tmp/test_foot_feedback_stress

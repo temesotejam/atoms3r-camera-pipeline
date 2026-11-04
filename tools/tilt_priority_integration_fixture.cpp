@@ -111,6 +111,50 @@ int main(){
   r.foot_span_control_.confirm(t+400,true,1200,1,65);
   assert(r.foot_span_control_.acceptedProbeCycles()==1);
  }
+ // The actual runner must cancel a camera candidate if the wheel guard
+ // truncates it, and apply the guard to the ordinary baseline instead.
+ // Here an unguarded 30 ms baseline and 35 ms candidate would become 27
+ // and 32 ms respectively. The latter must never leak out as an untracked
+ // camera intervention. Both guard paths start with the very same history.
+ for(int with_candidate=0;with_candidate<2;++with_candidate) {
+  ExperimentRunner r;uint32_t t=1000;r.tilt_priority_.peak(1,100,2.f);
+  for(int n=0;n<6;++n)for(int side: {-1,1}) {
+    tilt_priority::Choice coast;coast.selected=true;coast.coast=true;
+    coast.direction=static_cast<int8_t>(side);coast.target_deg=r.tilt_priority_.target();
+    r.tilt_priority_.crossing(static_cast<int8_t>(side),t);
+    r.tilt_priority_.confirm(static_cast<int8_t>(side),t,coast,true);
+    r.tilt_priority_.peak(static_cast<int8_t>(side),t+100,3.f);t+=300;
+  }
+  assert(r.tilt_priority_.target()==6.f);
+  r.foot_span_control_.preferHighCurrentFirst();
+  if(with_candidate) {
+    for(unsigned i=0;i<2;++i) {
+      const unsigned start=t+100+i*100;
+      const auto w=r.foot_span_control_.limit(start+50,30,1200,1,60,true,1.f,60.f,400.f);
+      assert(w==30);r.foot_span_control_.confirm(start+50,true,1200,1,w);
+      foot_span_control::Cycle c;c.start_ms=start;c.end_ms=start+100;c.positive_ms=start+50;
+      c.left=3;c.right=1;c.negative_peak=5;c.target_mj=1;c.negative_key=1;
+      c.negative_trigger_deg=static_cast<float>(i);c.positive_rate_dps=60;c.positive_rpm=400;
+      c.positive_width=w;c.positive_ma=1200;c.positive_sign=1;
+      c.complete=c.negative_known=c.positive_executed=true;r.foot_span_control_.cycle(c);
+    }
+    assert(r.foot_span_control_.offset()==5);
+    assert(r.foot_span_control_.state()==foot_span_control::State::ProbeOnce);
+  }
+  (void)r.wheel_cycle_guard_.limit(-1,100.f,true,t+350,30);
+  auto expected=r.wheel_cycle_guard_;
+  assert(expected.limit(1,400.f,true,t+400,30)==27);
+  Event e;e.zero_cross_abs_rate_dps=60.f;e.pre_input_wheel_speed_rpm=400.f;
+  assert(r.tryTiltPriority(e,t+400));
+  assert(e.valid && e.output_executed && e.foot_span_baseline_ms==30);
+  assert(e.foot_span_requested_ms==(with_candidate?35:30));
+  assert(e.pulse_width_ms==27 && r.width==27 && e.wheel_guard_legacy_ms==27);
+  assert(!(e.foot_span_flags & Event::Span_selected));
+  assert(r.foot_span_control_.offset()==0 && r.foot_span_control_.acceptedProbeCycles()==0);
+  // Next update must see the same history as one guard application, not two.
+  assert(r.wheel_cycle_guard_.limit(-1,200.f,true,t+700,40)==
+         expected.limit(-1,200.f,true,t+700,40));
+ }
  // The optional camera trial must never silently cap an ordinary 1200 mA
  // positive pulse at 100 ms. Grow the existing ramp through actual paired
  // peak/command confirmations, then test the real runner dispatch.
