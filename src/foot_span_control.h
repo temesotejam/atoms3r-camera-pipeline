@@ -55,6 +55,7 @@ class Controller {
     if(fault())return false;
     // Candidate not sent: restore the ordinary selector; do not pretend that
     // its resulting command tested the requested experimental width.
+    if(trial_active_ && confirmed_offset_!=0)retry_after_restore_=true;
     pending_=false;request_changed_=false;offset_ms_=0;requested_=baseline;trial_active_=false;have_observation_=false;
     proposal_sign_=0;
     pending_change_=confirmed_offset_!=0;
@@ -88,6 +89,14 @@ class Controller {
     // An older feedback generation after a new intervention is not a
     // response to the new intervention and must not increment it again.
     if(action->feedback_changed_ms!=last_feedback_changed_ms_)return;
+    // After an interrupted applied trial has actually returned to baseline,
+    // allow the ordinary controller to settle before reacquiring evidence.
+    // Only cycles that start after the wait count toward a new proposal.
+    if(retry_wait_) {
+      const uint32_t elapsed=c.start_ms-retry_start_ms_;
+      if(elapsed>=0x80000000u || elapsed<5000u) {invalidateObservation();return;}
+      retry_wait_=false;
+    }
     const bool continuous=last_usable_end_ && c.start_ms==last_usable_end_;
     consecutive_=continuous?consecutive_+1:1;last_usable_end_=c.end_ms;
     // Normalize asymmetry so shrinking both feet cannot look like progress.
@@ -269,6 +278,9 @@ class Controller {
       // Count only confirmed feedback transitions.
       if(applied_feedback){
         last_feedback_changed_ms_=now;confirmed_offset_=offset_ms_;proposal_sign_=0;++updates_;
+        if(confirmed_offset_==0 && retry_after_restore_) {
+          retry_after_restore_=false;retry_wait_=true;retry_start_ms_=now;
+        }
         trial_active_=offset_ms_!=0 && have_observation_;
         if(trial_active_) {
           trial_ratio_=std::fabs(observed_error_);
@@ -294,6 +306,7 @@ class Controller {
   void invalidateObservation() {
     // Drop both an active trial and a proposal not yet sent. Keeping the
     // proposal after clearing the reference would issue an untracked pulse.
+    if(trial_active_ && confirmed_offset_!=0)retry_after_restore_=true;
     consecutive_=0;last_usable_end_=0;weak_count_=0;have_reference_=false;
     imbalance_count_=0;imbalance_sign_=0;proposal_sign_=0;
     have_observation_=false;trial_active_=false;offset_ms_=0;
@@ -315,7 +328,7 @@ class Controller {
     uint16_t width=0,baseline=0;int16_t ma=0;int8_t sign=0;bool executed=false;float target_mj=NAN;};
   Actual actual_[8];unsigned actual_next_=0,actual_count_=0;
   State state_=State::Collect;
-  uint32_t last_end_=0,last_usable_end_=0,last_feedback_changed_ms_=0;
+  uint32_t last_end_=0,last_usable_end_=0,last_feedback_changed_ms_=0,retry_start_ms_=0;
   uint32_t observed_negative_key_=0,trial_negative_key_=0;
   uint16_t baseline_ms_=0,requested_=0;
   int16_t request_ma_=0;
@@ -333,6 +346,6 @@ class Controller {
   int imbalance_sign_=0,proposal_sign_=0;unsigned imbalance_count_=0;
   unsigned consecutive_=0,weak_count_=0,updates_=0;
   bool have_reference_=false,pending_=false,request_changed_=false,pending_change_=false,request_eligible_=false;
-  bool high_current_initial_=false;
+  bool high_current_initial_=false,retry_after_restore_=false,retry_wait_=false;
 };
 }

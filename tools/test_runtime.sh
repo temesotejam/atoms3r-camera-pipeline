@@ -28,6 +28,8 @@ g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_span_control.cpp 
 /tmp/test_foot_span_control
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_span_queued.cpp -o /tmp/test_foot_span_queued
 /tmp/test_foot_span_queued
+g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_span_retry.cpp -o /tmp/test_foot_span_retry
+/tmp/test_foot_span_retry
 python3 tools/test_foot_span_context_wiring.py
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_feedback_stress.cpp -o /tmp/test_foot_feedback_stress
 /tmp/test_foot_feedback_stress

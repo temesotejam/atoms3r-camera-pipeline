@@ -87,7 +87,9 @@ int main(){
     // cannot immediately propose again after an incomparable observation.
     assert(tick(x,500,3,1,5,30,60,80,true,1.f,1200)==30);
     assert(x.offset()==0);
-    tick(x,600,3,1,5,30,60,80,true,1.f,1200);
+    tick(x,5600,3,1,5,30,60,80,true,1.f,1200);
+    assert(x.offset()==0);
+    tick(x,5700,3,1,5,30,60,80,true,1.f,1200);
     assert(x.offset()==10 && !x.fault());
   }
   // A different state on the very first changed command must prevent the
