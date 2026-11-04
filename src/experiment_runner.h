@@ -42,6 +42,7 @@
 #include "tilt_stop.h"
 
 #include "experiment_status.h"
+#include "gyro_heading_diagnostic.h"
 
 class ExperimentRunner {
 public:
@@ -158,6 +159,7 @@ public:
   const char* presetName() const { return "MEKF_ADOPTED_DYNAMIC_BETA_COMPARE_V46"; }
 
 private:
+  void updateGyroHeadingDiagnostic(const ImuReading& r);
   gradual_start::Controller gradual_start_;
   foot_balance_adaptive::Controller foot_balance_;
   foot_energy_balance::Controller foot_energy_;
@@ -815,4 +817,7 @@ private:
   foot_span_control::Controller foot_span_control_;
   // Camera history is cold state; place it after the motion control fields.
   foot_fullstride_observer::Observer foot_span_observer_;
+  // Diagnostics are cold and must not change hot member offsets or control.
+  GyroHeadingDiagnostic gyro_heading_diagnostic_;
+  bool gyro_heading_start_pending_ = false;
 };

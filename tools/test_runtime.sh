@@ -32,6 +32,8 @@ g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_span_retry.cpp -o
 /tmp/test_foot_span_retry
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_trend.cpp -o /tmp/test_foot_trend
 /tmp/test_foot_trend
+g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_recent_gate.cpp -o /tmp/test_foot_recent_gate
+/tmp/test_foot_recent_gate
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_trend_integration.cpp -o /tmp/test_foot_trend_integration
 /tmp/test_foot_trend_integration
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_split.cpp -o /tmp/test_foot_split
@@ -199,5 +201,7 @@ python3 tools/test_bmm150_csv.py
 
 g++ -std=c++17 -O2 -Wall -Wextra -Werror -Isrc tools/test_gyro_steering.cpp -o /tmp/test_gyro_steering
 /tmp/test_gyro_steering
+g++ -std=c++17 -O2 -Wall -Wextra -Werror -Isrc tools/test_gyro_heading_diagnostic.cpp src/gyro_heading_diagnostic.cpp -o /tmp/test_gyro_heading_diagnostic
+/tmp/test_gyro_heading_diagnostic
 g++ -std=c++17 -O2 -Wall -Wextra -Werror -Itools/host_v46o -Isrc tools/test_compact_json_table.cpp -o /tmp/test_compact_json_table
 /tmp/test_compact_json_table

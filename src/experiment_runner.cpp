@@ -285,7 +285,8 @@ void ExperimentRunner::update() {
   status_.roller_battery_mV = roller_snapshot.battery_mV;
 
   const ImuReading& r = imu_->reading();
-  if (r.gyro_sequence != 0 && r.gyro_sequence != last_imu_update_us_) {
+  const bool new_gyro_sample = r.gyro_sequence != 0 && r.gyro_sequence != last_imu_update_us_;
+  if (new_gyro_sample) {
     if (timing_probe_pending_ && !timing_probe_imu_captured_ &&
         r.gyro_sequence != timing_probe_event_.gyro_sequence_at_start &&
         static_cast<int32_t>(r.last_gyro_update_us - timing_probe_event_.pulse_start_us) >= 0) {
@@ -372,6 +373,28 @@ void ExperimentRunner::update() {
   } else {
     setSyncLed(false);
     stopMotor();
+  }
+
+  // Diagnostics run only after motion, actuator and logging work; no steering
+  // or motor path reads the result. Log rows see the preceding sample.
+  if (new_gyro_sample) updateGyroHeadingDiagnostic(r);
+}
+
+__attribute__((noinline)) void ExperimentRunner::updateGyroHeadingDiagnostic(const ImuReading& r) {
+  if (energy_control_autonomous_mode_ && running()) {
+    if (gyro_heading_start_pending_) {
+      gyro_heading_start_pending_ = false;
+      const bool fresh_accel = r.imu_ok && r.accel_sequence != 0 && r.last_accel_update_us != 0 &&
+          static_cast<uint32_t>(micros() - r.last_accel_update_us) <= 50000;
+      gyro_heading_diagnostic_.start(r.ax_g, r.ay_g, r.az_g,
+          r.last_gyro_update_us, bias_ready_, fresh_accel);
+    } else {
+      gyro_heading_diagnostic_.sample(r.gx_dps, r.gy_dps, r.gz_dps,
+          status_.gyro_bias_x_dps, status_.gyro_bias_y_dps, status_.gyro_bias_z_dps,
+          Config::MEKF_GYRO_Y_SCALE, r.last_gyro_update_us);
+    }
+    status_.steering.gyro_valid = gyro_heading_diagnostic_.valid();
+    status_.steering.yaw_deg = gyro_heading_diagnostic_.yaw();
   }
 }
 
@@ -1392,9 +1415,10 @@ void ExperimentRunner::recordV59StateGateEvent(uint32_t crossing_ms, float hprev
 }
 
 void ExperimentRunner::beginStartSync(uint32_t now_ms) {
-  // 0.47.30: amplitude only. No heading integration or side-target schedule.
+  // Amplitude only: relative heading is a diagnostic, never a target.
   energy_control_autonomous_pending_target_deg_ = NAN;
   status_.steering = steering::disabledSnapshot();
+  gyro_heading_start_pending_ = energy_control_autonomous_mode_;
   tilt_guard_.reset();
   // V46z comparison-zero begin
   captureMekfComparisonZero(status_.mekf_start_sync_zero_abs_deg,
@@ -7294,4 +7318,3 @@ const char* ExperimentRunner::stateName() const {
   }
   return "UNKNOWN";
 }
-

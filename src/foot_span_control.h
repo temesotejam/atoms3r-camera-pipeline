@@ -139,8 +139,8 @@ class Controller {
     const int single_sign=e>.10f ? 1 : e<-.10f ? -1 : 0;
     const bool one_supported=trend_.ready() && sign && sign==single_sign;
     if(pending_change_ && proposal_sign_ &&
-       (one_proposal_ ? (!one_supported || sign!=proposal_sign_) :
-        (imbalance_count_<2 || imbalance_sign_!=proposal_sign_))) {
+       (!one_supported || sign!=proposal_sign_ ||
+        (!one_proposal_ && (imbalance_count_<2 || imbalance_sign_!=proposal_sign_)))) {
       offset_ms_=confirmed_offset_;pending_change_=false;proposal_sign_=0;one_proposal_=false;
       state_=offset_ms_==0 ? State::Collect : State::Hold;
     }
@@ -235,7 +235,10 @@ class Controller {
     // The strict two-cycle reference has priority. When it is unavailable or
     // disagrees with the long trend, allow only a single 1200 mA exploration
     // supported by a substantial same-sign latest cycle and long trend.
-    const bool strict=matched_.ready() && imbalance_count_>=2 &&
+    // A stale long-window imbalance should not launch another new input when
+    // the freshest full cycle has already balanced or reversed. The long
+    // trend is still required: a single imbalanced cycle cannot trigger this.
+    const bool strict=matched_.ready() && imbalance_count_>=2 && one_supported &&
         (filtered_error_>0.f ? 1 : -1)==imbalance_sign_;
     if(!strict) {
       if(!matched_.ready() && confirmed_offset_==0 && offset_ms_==0 && !pending_change_ &&

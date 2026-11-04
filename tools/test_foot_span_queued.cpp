@@ -20,10 +20,10 @@ int main(){
     if(kind==1)x.cycle(cycle(300,1,3));
     if(kind==2)x.cycle(cycle(300,3,1));
     const auto requested=x.limit(450,30,1200,1,60,true,1);
-    assert(requested==(kind==1?30:35));
+    assert(requested==(kind==2?35:30));
     assert(x.acceptedProbeCycles()==0 && !x.fault());
     x.confirm(450,true,1200,1,requested);
-    assert(x.acceptedProbeCycles()==(kind==1?0u:1u));
+    assert(x.acceptedProbeCycles()==(kind==2?1u:0u));
   }
   // A queued exploration must preserve a confirmed offset when canceled;
   // a pending safety rollback must never be canceled by new balance.
@@ -42,5 +42,5 @@ int main(){
     assert(x.offset()==(rollback?0:5));
     assert(x.limit(750,30,1200,1,60,true,1)==(rollback?30:35));
   }
-  std::cout << "queued foot correction: isolated balanced cycle retains trend; reversal cancels PASS\n";
+  std::cout << "queued foot correction: balanced or reversed latest cycle cancels proposal PASS\n";
 }
