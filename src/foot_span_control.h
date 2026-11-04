@@ -56,6 +56,7 @@ class Controller {
     // Candidate not sent: restore the ordinary selector; do not pretend that
     // its resulting command tested the requested experimental width.
     pending_=false;request_changed_=false;offset_ms_=0;requested_=baseline;trial_active_=false;have_observation_=false;
+    proposal_sign_=0;
     pending_change_=confirmed_offset_!=0;
     consecutive_=0;last_usable_end_=0;have_reference_=false;state_=State::Collect;return true;
   }
@@ -101,6 +102,14 @@ class Controller {
     if(sign && sign==imbalance_sign_ && continuous) {
       if(imbalance_count_<2)++imbalance_count_;
     } else {imbalance_sign_=sign;imbalance_count_=sign ? 1 : 0;}
+    // A queued exploratory change needs a still-sustained imbalance. A new
+    // complete cycle that is balanced or reverses the imbalance cancels the
+    // unsent proposal, while a safety rollback remains independent.
+    if(pending_change_ && proposal_sign_ &&
+       (imbalance_count_<2 || imbalance_sign_!=proposal_sign_)) {
+      offset_ms_=confirmed_offset_;pending_change_=false;proposal_sign_=0;
+      state_=offset_ms_==0 ? State::Collect : State::Hold;
+    }
     observed_left_=c.left;observed_right_=c.right;observed_peak_=c.negative_peak;
     observed_error_=e;observed_current_=c.positive_ma;observed_target_=c.target_mj;
     observed_negative_key_=c.negative_key;
@@ -153,7 +162,7 @@ class Controller {
         polarity_=-polarity_;
         const int restored=towardZero(offset_ms_);
         state_=restored==0?State::Collect:State::Restore;
-        if(restored!=offset_ms_){offset_ms_=restored;pending_change_=true;}
+        if(restored!=offset_ms_){offset_ms_=restored;pending_change_=true;proposal_sign_=0;}
         return;
       }
     }
@@ -169,7 +178,7 @@ class Controller {
       weak_count_=0;polarity_=-polarity_;
       const int restored=towardZero(offset_ms_);
       state_=restored==0?State::Collect:State::Restore;
-      if(restored!=offset_ms_) {offset_ms_=restored;pending_change_=true;}
+      if(restored!=offset_ms_) {offset_ms_=restored;pending_change_=true;proposal_sign_=0;}
       return;
     }
     if(std::fabs(filtered_error_)<=.10f){state_=State::Hold;return;}
@@ -178,7 +187,7 @@ class Controller {
     const int proposal=offset_ms_+step;
     const int bounded=proposal < -30 ? -30 : proposal > 30 ? 30 : proposal;
     state_=bounded<0?State::ProbeMinus:bounded>0?State::ProbePlus:State::Collect;
-    if(bounded!=offset_ms_) {offset_ms_=bounded;pending_change_=true;}
+    if(bounded!=offset_ms_) {offset_ms_=bounded;pending_change_=true;proposal_sign_=imbalance_sign_;}
   }
 
   uint16_t limit(uint32_t now,uint16_t baseline,int16_t ma,int sign,
@@ -259,7 +268,7 @@ class Controller {
           ma==request_ma_ && sign==1 && width==requested_ && offset_ms_!=confirmed_offset_;
       // Count only confirmed feedback transitions.
       if(applied_feedback){
-        last_feedback_changed_ms_=now;confirmed_offset_=offset_ms_;++updates_;
+        last_feedback_changed_ms_=now;confirmed_offset_=offset_ms_;proposal_sign_=0;++updates_;
         trial_active_=offset_ms_!=0 && have_observation_;
         if(trial_active_) {
           trial_ratio_=std::fabs(observed_error_);
@@ -286,7 +295,7 @@ class Controller {
     // Drop both an active trial and a proposal not yet sent. Keeping the
     // proposal after clearing the reference would issue an untracked pulse.
     consecutive_=0;last_usable_end_=0;weak_count_=0;have_reference_=false;
-    imbalance_count_=0;imbalance_sign_=0;
+    imbalance_count_=0;imbalance_sign_=0;proposal_sign_=0;
     have_observation_=false;trial_active_=false;offset_ms_=0;
     pending_change_=confirmed_offset_!=0;
     state_=pending_change_?State::Restore:State::Collect;
@@ -321,7 +330,7 @@ class Controller {
   int16_t observed_current_=0,trial_current_=0;uint16_t observed_baseline_=0,trial_baseline_=0;unsigned trial_count_=0;
   bool have_observation_=false,trial_active_=false,trial_right_=true,trial_reference_valid_=false;
   int offset_ms_=0,confirmed_offset_=0,polarity_=-1;
-  int imbalance_sign_=0;unsigned imbalance_count_=0;
+  int imbalance_sign_=0,proposal_sign_=0;unsigned imbalance_count_=0;
   unsigned consecutive_=0,weak_count_=0,updates_=0;
   bool have_reference_=false,pending_=false,request_changed_=false,pending_change_=false,request_eligible_=false;
   bool high_current_initial_=false;
