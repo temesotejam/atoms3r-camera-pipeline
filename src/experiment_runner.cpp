@@ -2978,6 +2978,16 @@ void ExperimentRunner::processFootSpanCycle() {
   // alone cannot masquerade as a complete full-cycle stroke.
   const bool left_shape=span.left.both_directions || span.left.low_signal;
   const bool right_shape=span.right.both_directions || span.right.low_signal;
+  // A separately bounded trend can retain actual high-quality observations
+  // across missed camera periods, while trials still require strict continuity.
+  // Both actuator contexts and fresh healthy sensors remain mandatory even
+  // for marking a period as skipped; a fault breaks the whole observation.
+  cycle.gap_allow=positives==1 && negatives==1 && peak && imu_ && roller_ &&
+      imu_->acquisitionHealthy() && !imu_->stale(millis()) && roller_->ok() &&
+      !status_.emergency_stop && status_.state==ExperimentState::RUNNING_BATCH_SWEEP;
+  cycle.gap_quality=feedback_quality && left_shape && right_shape &&
+      !span.left.single_outlier && !span.right.single_outlier &&
+      !span.left.edge_unverified && !span.right.edge_unverified;
   cycle.complete=feedback_quality && span.continuous && left_shape && right_shape &&
       !span.left.single_outlier && !span.right.single_outlier &&
       !span.left.edge_unverified && !span.right.edge_unverified &&

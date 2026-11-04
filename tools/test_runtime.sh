@@ -32,6 +32,12 @@ g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_span_retry.cpp -o
 /tmp/test_foot_span_retry
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_trend.cpp -o /tmp/test_foot_trend
 /tmp/test_foot_trend
+g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_gap_trend.cpp -o /tmp/test_foot_gap_trend
+/tmp/test_foot_gap_trend
+g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_gap_integration.cpp -o /tmp/test_foot_gap_integration
+/tmp/test_foot_gap_integration
+g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_delayed_invalid.cpp -o /tmp/test_foot_delayed_invalid
+/tmp/test_foot_delayed_invalid
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_recent_gate.cpp -o /tmp/test_foot_recent_gate
 /tmp/test_foot_recent_gate
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_stall_rescue.cpp -o /tmp/test_stall_rescue

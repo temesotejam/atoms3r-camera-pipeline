@@ -2,6 +2,7 @@
 #include <cmath>
 #include <cstdint>
 #include "foot_trend.h"
+#include "foot_gap_trend.h"
 
 // Online experimental correction of body-relative camera marker spans. These
 // values are not ground step lengths, and the initial control polarity is an
@@ -26,6 +27,10 @@ struct Cycle {
   int16_t positive_ma=0;
   int8_t positive_sign=0;
   bool complete=false, negative_known=false, positive_executed=false;
+  // Independent quality gate for historical observation. It uses the same
+  // image checks as complete except prior-cycle continuity; missing periods
+  // are explicitly skipped and never used to assess an intervention.
+  bool gap_quality=false, gap_allow=false;
 };
 enum class State : uint8_t { Collect, ProbeMinus, Restore, ProbePlus, Hold, Fault, ProbeOnce };
 class Controller {
@@ -49,7 +54,7 @@ class Controller {
     if(fault())return false;
     // A different selector is not a hardware fault. Cancel experimental
     // feedback and reacquire observation before trying another candidate.
-    (void)now;invalidateObservation();pending_=false;request_eligible_=false;return true;
+    (void)now;gap_trend_.reset();invalidateObservation();pending_=false;request_eligible_=false;return true;
   }
   bool cancelUnsent(uint16_t baseline) {
     (void)baseline;
@@ -68,6 +73,31 @@ class Controller {
   void cycle(const Cycle& c) {
     if(c.end_ms<=last_end_ || fault())return;
     last_end_=c.end_ms;
+    // The gap-tolerant record is observation-only. Verify the exact actual
+    // input before retaining either a period or a skipped image period.
+    // Never retain observations across an active experiment or restore.
+    const Actual* gap_action=nullptr;unsigned gap_actions=0;
+    for(unsigned i=0;i<actual_count_;++i) {
+      const Actual& a=actual_[(actual_next_+8-actual_count_+i)%8];
+      if(a.ms>c.start_ms && a.ms<c.end_ms){gap_action=&a;++gap_actions;}
+    }
+    const bool gap_context=c.gap_allow && !trial_active_ && !one_return_ && !retry_wait_ &&
+        confirmed_offset_==0 && offset_ms_==0 && !pending_change_ &&
+        c.negative_known && c.positive_executed && c.positive_sign==1 &&
+        c.positive_ma==1200 && c.start_ms<c.positive_ms && c.positive_ms<c.end_ms &&
+        std::isfinite(c.negative_peak) && c.negative_peak>0 &&
+        std::isfinite(c.negative_trigger_deg) && std::isfinite(c.negative_rate_dps) &&
+        std::isfinite(c.negative_rpm) && std::isfinite(c.positive_rate_dps) &&
+        std::isfinite(c.positive_rpm) && gap_actions==1 && gap_action &&
+        gap_action->ms==c.positive_ms && gap_action->executed && gap_action->ma==c.positive_ma &&
+        gap_action->sign==c.positive_sign && gap_action->width==c.positive_width &&
+        gap_action->feedback_changed_ms==last_feedback_changed_ms_ &&
+        std::isfinite(gap_action->target_mj) && std::isfinite(c.target_mj) &&
+        std::fabs(gap_action->target_mj-c.target_mj)<=.001f &&
+        gap_trend_.compatible(c.positive_ma,c.target_mj);
+    if(!gap_context)gap_trend_.reset();
+    else if(c.gap_quality)gap_trend_.accept(c.start_ms,c.end_ms,c.left,c.right,c.positive_ma,c.target_mj);
+    else gap_trend_.skip(c.start_ms,c.end_ms);
     if(!c.complete || !c.negative_known || !c.positive_executed || !supportedCurrent(c.positive_ma) ||
        c.positive_sign!=1 || c.start_ms>=c.positive_ms || c.positive_ms>=c.end_ms ||
        !std::isfinite(c.left) || !std::isfinite(c.right) || c.left<0 || c.right<0 ||
@@ -139,9 +169,10 @@ class Controller {
     const int single_sign=e>.10f ? 1 : e<-.10f ? -1 : 0;
     const bool one_supported=trend_.ready() && sign && sign==single_sign;
     if(pending_change_ && proposal_sign_ &&
-       (!one_supported || sign!=proposal_sign_ ||
-        (!one_proposal_ && (imbalance_count_<2 || imbalance_sign_!=proposal_sign_)))) {
-      offset_ms_=confirmed_offset_;pending_change_=false;proposal_sign_=0;one_proposal_=false;
+       (gap_proposal_ ? gap_trend_.direction(c.end_ms)!=proposal_sign_ :
+        (!one_supported || sign!=proposal_sign_ ||
+         (!one_proposal_ && (imbalance_count_<2 || imbalance_sign_!=proposal_sign_))))) {
+      offset_ms_=confirmed_offset_;pending_change_=false;proposal_sign_=0;one_proposal_=false;gap_proposal_=false;
       state_=offset_ms_==0 ? State::Collect : State::Hold;
     }
     // Mixed-context trend averages must never become the trial reference.
@@ -228,6 +259,16 @@ class Controller {
     }
     if(one_return_)return; // never accumulate a one-shot intervention
     if(!trend_.ready()) {
+      // Strict four-consecutive-cycle trials take priority. If image quality
+      // interrupted only the historical trend, permit one bounded 1200 mA
+      // observation probe with two fresh, matched consecutive cycles.
+      const int gs=gap_trend_.direction(c.end_ms);
+      if(gs && matched_.ready() && recent_sign==gs && single_sign==gs &&
+         confirmed_offset_==0 && offset_ms_==0 && !pending_change_ && !trial_active_ &&
+         !one_return_ && c.positive_ma==1200) {
+        offset_ms_=gs*polarity_*5;pending_change_=true;proposal_sign_=gs;
+        one_proposal_=true;gap_proposal_=true;state_=State::ProbeOnce;return;
+      }
       if(offset_ms_==0 && !pending_change_)state_=State::Collect;
       return;
     }
@@ -262,6 +303,7 @@ class Controller {
     const uint16_t safe=baseline<cap?baseline:cap;
     baseline_ms_=baseline;request_ma_=ma;request_target_mj_=target_mj;
     requested_=safe;pending_=false;request_changed_=false;request_eligible_=false;
+    if(!allowed || sign!=1 || !gap_trend_.compatible(ma,target_mj))gap_trend_.reset();
     if(fault()){requested_=0;return 0;}
     // The ordinary selector may change current every step. Keep the feedback
     // offset and track the actual current/width; a time offset at a different
@@ -297,11 +339,12 @@ class Controller {
     // intervention itself to occur at a quite different wheel/body speed.
     if(pending_change_ && offset_ms_!=0) {
       const int delta=static_cast<int>(observed_baseline_)-static_cast<int>(baseline);
-      if(!have_observation_ || !std::isfinite(positive_rate_dps) || !std::isfinite(positive_rpm) ||
+      if((gap_proposal_ && gap_trend_.direction(now)!=proposal_sign_) ||
+         !have_observation_ || !std::isfinite(positive_rate_dps) || !std::isfinite(positive_rpm) ||
          observed_current_!=ma || std::fabs(observed_target_-target_mj)>.05f ||
          delta>5 || delta< -5 || std::fabs(observed_positive_rate_-positive_rate_dps)>15.f ||
          std::fabs(observed_positive_rpm_-positive_rpm)>150.f ||
-         (!one_proposal_ && (!matched_.ready() ||
+         ((!one_proposal_ || gap_proposal_) && (!matched_.ready() ||
           matched_previous_.positive_ma!=ma || std::fabs(matched_previous_.target_mj-target_mj)>.05f ||
           static_cast<int>(matched_previous_baseline_)-static_cast<int>(baseline)>5 ||
           static_cast<int>(matched_previous_baseline_)-static_cast<int>(baseline)< -5 ||
@@ -359,7 +402,7 @@ class Controller {
     a.executed=executed;a.target_mj=request_target_mj_;a.baseline=baseline_ms_;
     actual_next_=(actual_next_+1)%8;if(actual_count_<8)++actual_count_;
     if(pending_ && (!executed || ma!=request_ma_ || sign!=1 || width!=requested_)) {
-      state_=State::Fault;pending_=false;return;
+      gap_trend_.reset();gap_proposal_=false;state_=State::Fault;pending_=false;return;
     }
     if(executed && supportedCurrent(ma) && sign==1 && width>0) {
       const bool applied_feedback=pending_change_ && request_eligible_ &&
@@ -368,7 +411,7 @@ class Controller {
       if(applied_feedback){
         const bool one_applied=one_proposal_ && confirmed_offset_==0 && offset_ms_!=0;
         const bool one_restored=one_return_ && offset_ms_==0;
-        matched_.reset();trend_.reset();
+        matched_.reset();trend_.reset();gap_trend_.reset();gap_proposal_=false;
         last_feedback_changed_ms_=now;confirmed_offset_=offset_ms_;confirmed_current_=offset_ms_!=0 ? ma : 0;proposal_sign_=0;++updates_;
         if(one_applied) {one_proposal_=false;one_return_=true;state_=State::ProbeOnce;}
         if(one_restored) {
@@ -403,7 +446,7 @@ class Controller {
   void discardUnsent() {
     // This drops only an unexecuted proposal/reference. A failed or active
     // intervention must go through invalidateObservation() and restoration.
-    matched_.reset();offset_ms_=0;proposal_sign_=0;pending_change_=false;one_proposal_=false;
+    matched_.reset();gap_trend_.reset();gap_proposal_=false;offset_ms_=0;proposal_sign_=0;pending_change_=false;one_proposal_=false;
     pending_=false;request_changed_=false;have_observation_=false;
     imbalance_count_=0;state_=State::Collect;
   }
@@ -413,7 +456,7 @@ class Controller {
     if(trial_active_ && confirmed_offset_!=0)retry_after_restore_=true;
     trend_.reset();matched_.reset();
     consecutive_=0;last_usable_end_=0;weak_count_=0;have_reference_=false;
-    imbalance_count_=0;imbalance_sign_=0;proposal_sign_=0;one_proposal_=false;
+    imbalance_count_=0;imbalance_sign_=0;proposal_sign_=0;one_proposal_=false;gap_proposal_=false;
     have_observation_=false;trial_active_=false;offset_ms_=0;
     pending_change_=confirmed_offset_!=0;
     state_=pending_change_?State::Restore:State::Collect;
@@ -454,6 +497,8 @@ class Controller {
   unsigned consecutive_=0,weak_count_=0,updates_=0;
   bool have_reference_=false,pending_=false,request_changed_=false,pending_change_=false,request_eligible_=false;
   bool high_current_initial_=false,retry_after_restore_=false,retry_wait_=false;
-  bool one_proposal_=false,one_return_=false;
+  bool one_proposal_=false,one_return_=false,gap_proposal_=false;
+  // Keep the historical window after established control members.
+  foot_gap_trend::Window gap_trend_;
 };
 }
