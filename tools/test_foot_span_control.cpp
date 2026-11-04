@@ -1,3 +1,4 @@
+#define FOOT_TREND_CYCLES 2
 #include "foot_span_control.h"
 #include <cassert>
 #include <iostream>
@@ -29,18 +30,36 @@ int main(){
   assert(signs.offset()==0);
   tick(signs,400,3,1,5,30,60,80,true,1.f,1200);
   tick(signs,500,3,1,5,30,60,80,true,1.f,1200);
-  assert(signs.offset()==10);
+  assert(signs.offset()==5);
   // The unmodeled 1200 mA walking branch can use the same actual-command
   // confirmation and two completed-cycle feedback as the 400 mA branch.
   // Changing a selected width never claims a measured physical improvement.
   Controller high;high.preferHighCurrentFirst();
   assert(tick(high,100,3,1,5,30,60,80,true,1.f,1200)==30);
   assert(tick(high,200,3,1,5,30,60,80,true,1.f,1200)==30);
-  assert(high.offset()==10 && high.acceptedProbeCycles()==0);
-  assert(tick(high,300,2.5f,1.1f,5,30,60,80,true,1.f,1200)==40);
+  assert(high.offset()==5 && high.acceptedProbeCycles()==0);
+  assert(tick(high,300,2.5f,1.1f,5,30,60,80,true,1.f,1200)==35);
   tick(high,400,2.5f,1.1f,5,30,60,80,true,1.f,1200);
   tick(high,500,2.5f,1.1f,5,30,60,80,true,1.f,1200);
-  assert(high.offset()==20 && !high.fault());
+  assert(high.offset()==10 && !high.fault());
+  // When +5 ms is blocked at a hard cap, explore -5 ms instead.
+  Controller high_cap;high_cap.preferHighCurrentFirst();
+  tick(high_cap,100,3,1,5,30,30,80,true,1.f,1200);
+  tick(high_cap,200,3,1,5,30,30,80,true,1.f,1200);
+  assert(high_cap.offset()==5);
+  assert(tick(high_cap,300,3,1,5,30,30,80,true,1.f,1200)==25);
+  // A retained 1200 mA offset is not carried over to another current.
+  Controller switched;switched.preferHighCurrentFirst();
+  tick(switched,100,3,1,5,30,60,80,true,1.f,1200);
+  tick(switched,200,3,1,5,30,60,80,true,1.f,1200);
+  tick(switched,300,1.2f,1.2f,5,30,60,80,true,1.f,1200);
+  tick(switched,400,1.2f,1.2f,5,30,60,80,true,1.f,1200);
+  tick(switched,500,1.2f,1.2f,5,30,60,80,true,1.f,1200);
+  assert(switched.offset()==5);
+  auto changed_current=switched.limit(650,30,400,1,60,true,1.f);
+  assert(changed_current==30 && switched.offset()==0);
+  switched.confirm(650,true,400,1,changed_current);
+  assert(!switched.fault());
   Controller high_bad;high_bad.preferHighCurrentFirst();
   tick(high_bad,100,3,1,5,30,60,80,true,1.f,1200);
   tick(high_bad,200,3,1,5,30,60,80,true,1.f,1200);
@@ -90,14 +109,14 @@ int main(){
     tick(x,5600,3,1,5,30,60,80,true,1.f,1200);
     assert(x.offset()==0);
     tick(x,5700,3,1,5,30,60,80,true,1.f,1200);
-    assert(x.offset()==10 && !x.fault());
+    assert(x.offset()==5 && !x.fault());
   }
   // A different state on the very first changed command must prevent the
   // candidate from being sent, even if subsequent cycles might match again.
   for(int changed=0;changed<2;++changed) {
     Controller x;x.preferHighCurrentFirst();tick(x,100,3,1,5,30,60,80,true,1.f,1200);
     tick(x,200,3,1,5,30,60,80,true,1.f,1200);
-    assert(x.offset()==10);
+    assert(x.offset()==5);
     const auto w=x.limit(350,30,1200,1,60,true,1.f,
         changed==0 ? 16.f : 0.f,changed==1 ? -151.f : 0.f);
     assert(w==30 && x.offset()==0 && !x.fault());
@@ -183,8 +202,10 @@ int main(){
   restored.positive_sign=1;restored.complete=restored.negative_known=restored.positive_executed=true;
   pending_invalid.cycle(restored);
   assert(tick(pending_invalid,24205,3,1)==100);
+  assert(pending_invalid.offset()==0); // changed negative mode restarts the trend
+  assert(tick(pending_invalid,24305,3,1)==100);
   assert(pending_invalid.offset()==-10);
-  assert(tick(pending_invalid,24305,3,1)==90 && !pending_invalid.fault());
+  assert(tick(pending_invalid,24405,3,1)==90 && !pending_invalid.fault());
   // Selector changes have the same discard/reacquire behavior.
   Controller selector;tick(selector,100,3,1);tick(selector,200,3,1);
   assert(selector.offset()==-10 && selector.selectorUnavailable(250));

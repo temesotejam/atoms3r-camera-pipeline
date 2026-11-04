@@ -20,5 +20,5 @@ assert 'foot_span_control_.limit(' in runner and 'choice.width_ms<=100' in runne
 assert 'tilt_priority_.target()>=6.f' in runner and 'preferHighCurrentFirst()' in runner
 assert 'tilt_priority_.timingCap(' in runner and 'Span_selected' in runner
 metadata=(root/'src/psram_logger.cpp').read_text(encoding='utf8')
-assert 'confirmed_1200ma_positive_width_trial_v2' in metadata
+assert 'confirmed_1200ma_long_trend_trial_v3' in metadata
 print('1200mA camera feedback, comparable context and log wiring PASS')

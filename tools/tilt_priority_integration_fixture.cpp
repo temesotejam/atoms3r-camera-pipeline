@@ -1,3 +1,4 @@
+#define FOOT_TREND_CYCLES 2
 #include "tilt_priority.h"
 #include "wheel_cycle_guard.h"
 #include "foot_span_control.h"
@@ -99,15 +100,15 @@ int main(){
     c.positive_width=w;c.positive_ma=1200;c.positive_sign=1;
     c.complete=c.negative_known=c.positive_executed=true;r.foot_span_control_.cycle(c);
   }
-  assert(r.foot_span_control_.offset()==10);
+  assert(r.foot_span_control_.offset()==5);
   Event neg;neg.physical_next_peak_side=-1;
   assert(r.tryTiltPriority(neg,t+350));
-  assert(neg.output_executed && r.foot_span_control_.offset()==10);
+  assert(neg.output_executed && r.foot_span_control_.offset()==5);
   assert(!(neg.foot_span_flags & Event::Span_selected));
   Event e;assert(r.tryTiltPriority(e,t+400));
-  assert(e.valid && e.output_executed && e.foot_span_baseline_ms==60 && e.foot_span_requested_ms==70);
-  assert(e.pulse_width_ms==70 && r.width==70 && (e.foot_span_flags & Event::Span_selected));
-  r.foot_span_control_.confirm(t+400,true,1200,1,70);
+  assert(e.valid && e.output_executed && e.foot_span_baseline_ms==60 && e.foot_span_requested_ms==65);
+  assert(e.pulse_width_ms==65 && r.width==65 && (e.foot_span_flags & Event::Span_selected));
+  r.foot_span_control_.confirm(t+400,true,1200,1,65);
   assert(r.foot_span_control_.acceptedProbeCycles()==1);
  }
  // The optional camera trial must never silently cap an ordinary 1200 mA

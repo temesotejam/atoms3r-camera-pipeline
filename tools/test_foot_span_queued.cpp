@@ -1,3 +1,4 @@
+#define FOOT_TREND_CYCLES 2
 #include "foot_span_control.h"
 #include <cassert>
 #include <iostream>
@@ -14,15 +15,15 @@ int main(){
     Controller x;x.preferHighCurrentFirst();
     // Three ordinary commands arrive before delayed camera cycles are processed.
     for(unsigned t=150;t<=350;t+=100){assert(x.limit(t,30,1200,1,60,true,1)==30);x.confirm(t,true,1200,1,30);}
-    x.cycle(cycle(100,3,1));x.cycle(cycle(200,3,1));assert(x.offset()==10);
+    x.cycle(cycle(100,3,1));x.cycle(cycle(200,3,1));assert(x.offset()==5);
     if(kind==0)x.cycle(cycle(300,2,2));
     if(kind==1)x.cycle(cycle(300,1,3));
     if(kind==2)x.cycle(cycle(300,3,1));
     const auto requested=x.limit(450,30,1200,1,60,true,1);
-    assert(requested==(kind==2?40:30));
+    assert(requested==(kind==1?30:35));
     assert(x.acceptedProbeCycles()==0 && !x.fault());
     x.confirm(450,true,1200,1,requested);
-    assert(x.acceptedProbeCycles()==(kind==2?1u:0u));
+    assert(x.acceptedProbeCycles()==(kind==1?0u:1u));
   }
   // A queued exploration must preserve a confirmed offset when canceled;
   // a pending safety rollback must never be canceled by new balance.
@@ -32,14 +33,14 @@ int main(){
       auto w=x.limit(t+50,30,1200,1,60,true,1);x.confirm(t+50,true,1200,1,w);x.cycle(cycle(t,3,1));
     }
     for(unsigned t=300;t<=600;t+=100) {
-      auto w=x.limit(t+50,30,1200,1,60,true,1);assert(w==40);x.confirm(t+50,true,1200,1,w);
+      auto w=x.limit(t+50,30,1200,1,60,true,1);assert(w==35);x.confirm(t+50,true,1200,1,w);
       if(t<500){auto c=cycle(t,rollback?1.5f:2.5f,rollback?.5f:1.1f);c.positive_width=w;x.cycle(c);}
     }
-    auto c5=cycle(500,rollback?1.5f:2.5f,rollback?.5f:1.1f);c5.positive_width=40;x.cycle(c5);
-    assert(x.offset()==(rollback?0:20));
-    auto c6=cycle(600,2,2);c6.positive_width=40;x.cycle(c6);
+    auto c5=cycle(500,rollback?1.5f:2.5f,rollback?.5f:1.1f);c5.positive_width=35;x.cycle(c5);
     assert(x.offset()==(rollback?0:10));
-    assert(x.limit(750,30,1200,1,60,true,1)==(rollback?30:40));
+    auto c6=cycle(600,1,3);c6.positive_width=35;x.cycle(c6);
+    assert(x.offset()==(rollback?0:5));
+    assert(x.limit(750,30,1200,1,60,true,1)==(rollback?30:35));
   }
-  std::cout << "queued foot correction: balanced/reversed cancel; sustained confirms PASS\n";
+  std::cout << "queued foot correction: isolated balanced cycle retains trend; reversal cancels PASS\n";
 }

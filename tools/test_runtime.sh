@@ -30,6 +30,10 @@ g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_span_queued.cpp -
 /tmp/test_foot_span_queued
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_span_retry.cpp -o /tmp/test_foot_span_retry
 /tmp/test_foot_span_retry
+g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_trend.cpp -o /tmp/test_foot_trend
+/tmp/test_foot_trend
+g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_trend_integration.cpp -o /tmp/test_foot_trend_integration
+/tmp/test_foot_trend_integration
 python3 tools/test_foot_span_context_wiring.py
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_foot_feedback_stress.cpp -o /tmp/test_foot_feedback_stress
 /tmp/test_foot_feedback_stress

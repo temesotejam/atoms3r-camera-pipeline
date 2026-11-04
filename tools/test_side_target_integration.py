@@ -79,7 +79,8 @@ with tempfile.TemporaryDirectory(prefix='side_target_runner_') as td:
 # Compile and execute the real post-selector guard with host sensor doubles.
 select_method='bool ExperimentRunner::selectFootPhaseOutput('+select.split(
     'void ExperimentRunner::choosePeakMpc(',1)[0]
-selector_fixture=r'''#include "gradual_start.h"
+selector_fixture=r'''#define FOOT_TREND_CYCLES 2
+#include "gradual_start.h"
 #include "foot_span_control.h"
 #include "foot_span_candidate.h"
 #include "peak_error_adaptation.h"

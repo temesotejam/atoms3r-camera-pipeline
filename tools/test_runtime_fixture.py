@@ -61,7 +61,7 @@ header = converter.parse_header(data)
 metadata = converter.expand_tables(json.loads(data[110:110+header['metadata_json_size']], parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value))))
 assert metadata['metadata_json_final_bytes'] == header['metadata_json_size']
 assert not metadata['metadata_event_detail_truncated']
-assert metadata['firmware_revision']=='1.0.82-foot-retry-guard'
+assert metadata['firmware_revision']=='1.0.83-foot-fine-trial'
 for manifest in ('site/manifest.json','site/manifest-freefoot-runtime-v2.json'):
     cfg=json.loads(Path(manifest).read_text())
     assert cfg['version']==metadata['firmware_revision']
@@ -285,7 +285,7 @@ for work_first, suffix in ((False, '.fallback-first.rwlog'), (True, '.work-first
     assert work_metadata['foot_span_high_current']['command_mA'] == 1200
     assert work_metadata['foot_span_high_current']['minimum_stage_target_deg'] == 6
     assert work_metadata['foot_span_high_current']['initial_left_greater_right'] == 'increase_positive_width_first;reverse_if_unfavorable'
-    assert work_metadata['foot_span_high_current']['step_ms'] == 10
+    assert work_metadata['foot_span_high_current']['step_ms'] == 5
     assert work_metadata['foot_span_high_current']['positive_rate_tolerance_dps'] == 15
     assert work_metadata['foot_span_high_current']['positive_rpm_tolerance'] == 150
     assert work_metadata['foot_span_high_current']['extremum_disagreement_deg'] == 1.5

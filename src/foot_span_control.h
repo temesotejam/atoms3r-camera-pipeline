@@ -1,6 +1,7 @@
 #pragma once
 #include <cmath>
 #include <cstdint>
+#include "foot_trend.h"
 
 // Online experimental correction of body-relative camera marker spans. These
 // values are not ground step lengths, and the initial control polarity is an
@@ -99,28 +100,42 @@ class Controller {
     }
     const bool continuous=last_usable_end_ && c.start_ms==last_usable_end_;
     consecutive_=continuous?consecutive_+1:1;last_usable_end_=c.end_ms;
-    // Normalize asymmetry so shrinking both feet cannot look like progress.
-    // A small constant avoids unstable division when both signals are small;
-    // the camera width is not an absolute ground stride.
-    if(c.left+c.right<.3f) {invalidateObservation();return;}
+    // Aggregate several complete cycles before treating a temporary
+    // difference as a sustained imbalance. Keep unlike command contexts out
+    // of the same window. The mean is camera-relative, not ground stride.
     const float e=(c.left-c.right)/(c.left+c.right+.1f);
-    // A sign reversal between adjacent complete cycles is not evidence for a
-    // sustained side imbalance. Reacquire two consecutive same-sign cycles
-    // before proposing a new offset; rollback remains independent of this.
-    const int sign=e>.10f ? 1 : e<-.10f ? -1 : 0;
-    if(sign && sign==imbalance_sign_ && continuous) {
-      if(imbalance_count_<2)++imbalance_count_;
-    } else {imbalance_sign_=sign;imbalance_count_=sign ? 1 : 0;}
-    // A queued exploratory change needs a still-sustained imbalance. A new
-    // complete cycle that is balanced or reverses the imbalance cancels the
-    // unsent proposal, while a safety rollback remains independent.
+    const int base_delta=static_cast<int>(action->baseline)-static_cast<int>(trend_baseline_);
+    if(trial_active_ && trial_count_>0 && !continuous) {invalidateObservation();return;}
+    if(trend_.count() && (c.positive_ma!=trend_context_.positive_ma ||
+       std::fabs(c.target_mj-trend_context_.target_mj)>.05f || base_delta>5 || base_delta< -5 ||
+       !comparableNegative(c.negative_key,trend_context_.negative_key) ||
+       std::fabs(c.negative_trigger_deg-trend_context_.negative_trigger_deg)>.5f ||
+       std::fabs(c.negative_rate_dps-trend_context_.negative_rate_dps)>10.f ||
+       std::fabs(c.negative_rpm-trend_context_.negative_rpm)>100.f ||
+       std::fabs(c.positive_rate_dps-trend_context_.positive_rate_dps)>15.f ||
+       std::fabs(c.positive_rpm-trend_context_.positive_rpm)>150.f)) {
+      if(trial_active_ && trial_count_>0) {invalidateObservation();return;}
+      trend_.reset();
+    }
+    if(!trend_.count() || !continuous) {trend_.reset();trend_context_=c;trend_baseline_=action->baseline;}
+    if(!trend_.cycle(c.start_ms,c.end_ms,c.left,c.right,c.negative_peak,true)) {
+      invalidateObservation();return;
+    }
+    const auto avg=trend_.average();
+    const float trend_error=trend_.ready()?avg.error:e;
+    const int sign=trend_error>.10f ? 1 : trend_error<-.10f ? -1 : 0;
+    imbalance_sign_=sign;imbalance_count_=trend_.ready() && sign ? 2u : 0u;
+    // A new complete observation may cancel an unsent proposal only when
+    // the full moving window no longer supports its direction.
     if(pending_change_ && proposal_sign_ &&
        (imbalance_count_<2 || imbalance_sign_!=proposal_sign_)) {
       offset_ms_=confirmed_offset_;pending_change_=false;proposal_sign_=0;
       state_=offset_ms_==0 ? State::Collect : State::Hold;
     }
-    observed_left_=c.left;observed_right_=c.right;observed_peak_=c.negative_peak;
-    observed_error_=e;observed_current_=c.positive_ma;observed_target_=c.target_mj;
+    observed_left_=trend_.ready()?avg.left:c.left;
+    observed_right_=trend_.ready()?avg.right:c.right;
+    observed_peak_=trend_.ready()?avg.negative_peak:c.negative_peak;
+    observed_error_=trend_error;observed_current_=c.positive_ma;observed_target_=c.target_mj;
     observed_negative_key_=c.negative_key;
     observed_negative_trigger_=c.negative_trigger_deg;
     observed_negative_rate_=c.negative_rate_dps;observed_negative_rpm_=c.negative_rpm;
@@ -131,15 +146,21 @@ class Controller {
       filtered_error_=e;reference_peak_=c.negative_peak;
       reference_left_=c.left;reference_right_=c.right;have_reference_=true;return;
     }
-    filtered_error_=.5f*filtered_error_+.5f*e;
+    filtered_error_=trend_error;
     if(offset_ms_==0) {
       reference_peak_=.8f*reference_peak_+.2f*c.negative_peak;
       reference_left_=.8f*reference_left_+.2f*c.left;
       reference_right_=.8f*reference_right_+.2f*c.right;
     }
+    // Protect the gait even in the overlapping cycle, before waiting for a
+    // complete post-intervention trend. This unwinds the whole offset.
+    if(trial_active_ && c.end_ms>last_feedback_changed_ms_ &&
+       c.negative_peak<trial_peak_*.7f && c.negative_peak<trial_peak_-1.f) {
+      polarity_=-polarity_;invalidateObservation();return;
+    }
     if(pending_change_ || consecutive_<2 ||
        (action->feedback_changed_ms && c.start_ms<=action->feedback_changed_ms))return;
-    // Capture two complete observations after the actual changed command.
+    // Capture a complete trend window after the actual changed command.
     // Negative-side input/contact can change too: this is trend evidence,
     // never a claim that the pulse caused the measured difference.
     if(trial_active_) {
@@ -154,9 +175,10 @@ class Controller {
         invalidateObservation();return;
       }
       const float weak=trial_right_?c.right:c.left;
-      trial_ratio_sum_+=std::fabs(e);trial_weak_sum_+=weak;trial_peak_sum_+=c.negative_peak;
-      if(++trial_count_<2)return;
-      const float ratio=trial_ratio_sum_*.5f,weak_mean=trial_weak_sum_*.5f,peak=trial_peak_sum_*.5f;
+      trial_ratio_sum_+=e;trial_weak_sum_+=weak;trial_peak_sum_+=c.negative_peak;
+      if(++trial_count_<foot_trend::Window::kCycles)return;
+      const float scale=1.f/foot_trend::Window::kCycles;
+      const float ratio=std::fabs(trial_ratio_sum_*scale),weak_mean=trial_weak_sum_*scale,peak=trial_peak_sum_*scale;
       trial_active_=false;
       const bool weak_kept=weak_mean>=trial_weak_*.8f && weak_mean>=trial_weak_-.10f;
       // Balance is only a useful success when the initially weaker foot has
@@ -169,7 +191,7 @@ class Controller {
       // negative oscillation: unwind this offset step and explore oppositely.
       if(!weak_kept || !weak_improved || !peak_kept || ratio+.02f>=trial_ratio_) {
         polarity_=-polarity_;
-        const int restored=towardZero(offset_ms_);
+        const int restored=towardZero(offset_ms_, c.positive_ma==1200 ? 5 : 10);
         state_=restored==0?State::Collect:State::Restore;
         if(restored!=offset_ms_){offset_ms_=restored;pending_change_=true;proposal_sign_=0;}
         return;
@@ -185,14 +207,14 @@ class Controller {
     if(offset_ms_!=0 && (weak_loss || peak_loss))++weak_count_;else weak_count_=0;
     if(weak_count_>=2) {
       weak_count_=0;polarity_=-polarity_;
-      const int restored=towardZero(offset_ms_);
+      const int restored=towardZero(offset_ms_, c.positive_ma==1200 ? 5 : 10);
       state_=restored==0?State::Collect:State::Restore;
       if(restored!=offset_ms_) {offset_ms_=restored;pending_change_=true;proposal_sign_=0;}
       return;
     }
     if(std::fabs(filtered_error_)<=.10f){state_=State::Hold;return;}
     if(imbalance_count_<2 || (filtered_error_>0.f ? 1 : -1)!=imbalance_sign_)return;
-    const int step=(filtered_error_>0.f ? 1 : -1)*polarity_*10;
+    const int step=(filtered_error_>0.f ? 1 : -1)*polarity_*(c.positive_ma==1200 ? 5 : 10);
     const int proposal=offset_ms_+step;
     const int bounded=proposal < -30 ? -30 : proposal > 30 ? 30 : proposal;
     state_=bounded<0?State::ProbeMinus:bounded>0?State::ProbePlus:State::Collect;
@@ -216,6 +238,11 @@ class Controller {
       state_=State::Collect;return safe;
     }
     request_eligible_=true;
+    // An offset identified at one current is not transferable to a different
+    // current. Restore the ordinary selector and reacquire fresh evidence.
+    if(confirmed_offset_!=0 && ma!=confirmed_current_) {
+      invalidateObservation();return safe;
+    }
     // A candidate proposed from an older camera cycle must not be submitted
     // after a missing/invalid observation. Ordinary output remains available.
     if(!have_observation_ && offset_ms_!=0)invalidateObservation();
@@ -237,14 +264,25 @@ class Controller {
         invalidateObservation();return safe;
       }
     }
+    // Recheck the context for every pulse in an active experiment. A staged
+    // target change makes another corrected pulse incomparable even when the
+    // offset itself has not changed since its first confirmed application.
+    const int trial_base_delta=static_cast<int>(baseline)-static_cast<int>(trial_baseline_);
+    if(trial_active_ && (ma!=trial_current_ || std::fabs(target_mj-trial_target_)>.05f ||
+       trial_base_delta>5 || trial_base_delta< -5 || !std::isfinite(positive_rate_dps) ||
+       !std::isfinite(positive_rpm) || std::fabs(positive_rate_dps-trial_positive_rate_)>15.f ||
+       std::fabs(positive_rpm-trial_positive_rpm_)>150.f)) {
+      invalidateObservation();return safe;
+    }
+    const int trial_step=ma==1200 ? 5 : 10;
     // If a newly requested first step has no room in that direction, try the
     // other direction explicitly instead of repeatedly counting a blocked
     // proposal. This is an exploratory intervention, not proof that the
-    // opposite sign improves gait. Never exceed one 10ms feedback step.
-    if(pending_change_ && confirmed_offset_==0 && offset_ms_==10 && safe==cap && safe>=20) {
-      polarity_=-polarity_;offset_ms_=-10;state_=State::ProbeMinus;
-    } else if(pending_change_ && confirmed_offset_==0 && offset_ms_==-10 && safe==10 && cap>=20) {
-      polarity_=-polarity_;offset_ms_=10;state_=State::ProbePlus;
+    // opposite sign improves gait. Use the current-dependent feedback step.
+    if(pending_change_ && confirmed_offset_==0 && offset_ms_==trial_step && safe==cap && safe>=10+trial_step) {
+      polarity_=-polarity_;offset_ms_=-trial_step;state_=State::ProbeMinus;
+    } else if(pending_change_ && confirmed_offset_==0 && offset_ms_==-trial_step && safe==10 && cap>=10+trial_step) {
+      polarity_=-polarity_;offset_ms_=trial_step;state_=State::ProbePlus;
     }
     int wanted=static_cast<int>(safe)+offset_ms_;
     // Anti-windup: a correction blocked by a physical cap is not an
@@ -256,7 +294,7 @@ class Controller {
     // offset transition only after the resulting command is confirmed too.
     if(offset_ms_!=confirmed_offset_)pending_change_=true;
     if(offset_ms_==0 && (state_==State::ProbeMinus || state_==State::ProbePlus))state_=State::Collect;
-    // Only each feedback OFFSET update is limited to 10ms. The ordinary
+    // Each feedback OFFSET update is limited to its current-dependent step. The ordinary
     // selector can change its own width or mode by more than 10ms; do not
     // suppress that normal output merely because its model branch changed.
     // The real absolute hardware/gradual-start cap still takes precedence.
@@ -277,7 +315,8 @@ class Controller {
           ma==request_ma_ && sign==1 && width==requested_ && offset_ms_!=confirmed_offset_;
       // Count only confirmed feedback transitions.
       if(applied_feedback){
-        last_feedback_changed_ms_=now;confirmed_offset_=offset_ms_;proposal_sign_=0;++updates_;
+        trend_.reset();
+        last_feedback_changed_ms_=now;confirmed_offset_=offset_ms_;confirmed_current_=offset_ms_!=0 ? ma : 0;proposal_sign_=0;++updates_;
         if(confirmed_offset_==0 && retry_after_restore_) {
           retry_after_restore_=false;retry_wait_=true;retry_start_ms_=now;
         }
@@ -307,6 +346,7 @@ class Controller {
     // Drop both an active trial and a proposal not yet sent. Keeping the
     // proposal after clearing the reference would issue an untracked pulse.
     if(trial_active_ && confirmed_offset_!=0)retry_after_restore_=true;
+    trend_.reset();
     consecutive_=0;last_usable_end_=0;weak_count_=0;have_reference_=false;
     imbalance_count_=0;imbalance_sign_=0;proposal_sign_=0;
     have_observation_=false;trial_active_=false;offset_ms_=0;
@@ -323,10 +363,11 @@ class Controller {
     const int delta=static_cast<int>(a&0x7fffu)-static_cast<int>(b&0x7fffu);
     return delta>=-10 && delta<=10;
   }
-  static int towardZero(int value){return value>10?value-10:value< -10?value+10:0;}
+  static int towardZero(int value,int step){return value>step?value-step:value< -step?value+step:0;}
   struct Actual {uint32_t ms=0,feedback_changed_ms=0;
     uint16_t width=0,baseline=0;int16_t ma=0;int8_t sign=0;bool executed=false;float target_mj=NAN;};
   Actual actual_[8];unsigned actual_next_=0,actual_count_=0;
+  foot_trend::Window trend_;Cycle trend_context_{};uint16_t trend_baseline_=0;
   State state_=State::Collect;
   uint32_t last_end_=0,last_usable_end_=0,last_feedback_changed_ms_=0,retry_start_ms_=0;
   uint32_t observed_negative_key_=0,trial_negative_key_=0;
@@ -340,7 +381,7 @@ class Controller {
   float trial_positive_rate_=0,trial_positive_rpm_=0;
   float trial_ratio_=0,trial_weak_=0,trial_peak_=0,trial_target_=0;
   float trial_ratio_sum_=0,trial_weak_sum_=0,trial_peak_sum_=0;
-  int16_t observed_current_=0,trial_current_=0;uint16_t observed_baseline_=0,trial_baseline_=0;unsigned trial_count_=0;
+  int16_t observed_current_=0,trial_current_=0,confirmed_current_=0;uint16_t observed_baseline_=0,trial_baseline_=0;unsigned trial_count_=0;
   bool have_observation_=false,trial_active_=false,trial_right_=true,trial_reference_valid_=false;
   int offset_ms_=0,confirmed_offset_=0,polarity_=-1;
   int imbalance_sign_=0,proposal_sign_=0;unsigned imbalance_count_=0;
