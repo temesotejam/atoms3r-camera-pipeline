@@ -33,7 +33,8 @@ assert 'event.work_control_branch=15' in method
 assert 'tilt_priority_.crossing(in.next_side,t_test_ms)' in method
 assert 'in.crossing_rate_dps=event.zero_cross_abs_rate_dps' in method
 assert 'foot_span_control_.reset()' not in method
-assert 'foot_span_control_.limit(' in method
+assert 'long_foot_balance_.propose(' in method
+assert 'long_foot_balance_.confirm(' in method
 assert 'tilt_priority_.timingCap(' in method
 assert 'event.zero_cross_abs_rate_dps = fabsf(rate_dps)' in at_zero
 assert 'imu_->acquisitionHealthy() && !imu_->stale(millis())' in method

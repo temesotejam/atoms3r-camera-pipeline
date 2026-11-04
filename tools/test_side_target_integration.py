@@ -15,7 +15,8 @@ assert runner.count(start)==1 and runner.count(end)==1
 method=start+runner.split(start,1)[1].split(end,1)[0]
 select=runner.split('bool ExperimentRunner::selectFootPhaseOutput(',1)[1].split(
     '\nvoid ExperimentRunner::choosePeakMpc(',1)[0]
-assert select.index('if(!phase_sensors_fresh)') < select.index('const uint16_t limited=')
+assert 'if(!healthy)' in select and 'long_foot_balance_.reset()' in select
+assert 'foot_span_control_.limit(' not in select
 assert 'positivePeakAtLeast(' not in select
 pending='energy_control_autonomous_pending_target_deg_ = work_mode && event.target_peak_deg==8.f\n      ? event.foot_balance_target_deg : event.target_peak_deg;'
 assert pending in runner
@@ -82,6 +83,7 @@ select_method='bool ExperimentRunner::selectFootPhaseOutput('+select.split(
 selector_fixture=r'''#define FOOT_TREND_CYCLES 2
 #include "gradual_start.h"
 #include "foot_span_control.h"
+#include "long_foot_balance.h"
 #include "foot_span_candidate.h"
 #include "peak_error_adaptation.h"
 #include <cassert>
@@ -106,6 +108,7 @@ struct Status {bool emergency_stop=false;ExperimentState state=ExperimentState::
 class ExperimentRunner {public:
  Roller roller_storage;Imu imu_storage;Roller* roller_=&roller_storage;Imu* imu_=&imu_storage;
  Status status_;gradual_start::Controller gradual_start_;foot_span_control::Controller foot_span_control_;
+ long_foot_balance::Controller long_foot_balance_;
  lateral_energy::CurrentTable positive_current_probe_tables_[2],lateral_current_table_;
  bool wheelWorkMode()const{return true;}
  void requestEmergencyStop(const char*){status_.emergency_stop=true;}
@@ -122,22 +125,11 @@ int main(){
  choice.branch=5;choice.current_ma=400;choice.command_sign=1;
  int16_t current=400;const lateral_energy::CurrentTable* table=nullptr;
  {ExperimentRunner r;Event e;
-  // Develop a proposed -10ms correction, then demonstrate that an under-
-  // target positive peak does not discard valid foot feedback.
-  auto sample=[&](uint32_t start){
-   auto width=r.foot_span_control_.limit(start+50,80,400,1,100,true,1);
-   r.foot_span_control_.confirm(start+50,true,400,1,width);
-   foot_span_control::Cycle c;c.start_ms=start;c.end_ms=start+100;c.positive_ms=start+50;
-   c.left=3;c.right=1;c.negative_peak=5;c.target_mj=1;c.positive_width=width;
-   c.negative_known=true;c.negative_key=1;
-   c.positive_ma=400;c.positive_sign=1;c.complete=c.positive_executed=true;
-   r.foot_span_control_.cycle(c);
-  };
-  sample(100);sample(200);assert(r.foot_span_control_.offset()==-10);
-  r.gradual_start_.peak(1,5,300,true,300);
-  assert(!r.selectFootPhaseOutput(e,350,7.8,choice,current,table));
-  assert(r.foot_span_control_.offset()==-10 && e.foot_span_requested_ms==70);
-  assert(choice.width_ms==70 && e.span_selected && !r.status_.emergency_stop);
+  for(unsigned i=0;i<5;++i)r.long_foot_balance_.observe(100+i*100,200+i*100,3,1,6,5,true,true);
+  assert(r.long_foot_balance_.propose(700,80,100,true)==85);
+  r.long_foot_balance_.confirm(700,80,85,true);assert(r.long_foot_balance_.offset()==5);
+  assert(!r.selectFootPhaseOutput(e,800,7.8,choice,current,table));
+  assert(choice.width_ms==80 && !e.span_selected && r.long_foot_balance_.offset()==0);
  }
  {ExperimentRunner r;Event e;e.pre_input_wheel_speed_valid=false;
   assert(r.selectFootPhaseOutput(e,350,7.8,choice,current,table));
@@ -146,14 +138,14 @@ int main(){
  {ExperimentRunner r;Event e;choice.width_ms=80;
   // No completed usable camera cycle: keep the ordinary selection.
   assert(!r.selectFootPhaseOutput(e,350,7.8,choice,current,table));
-  assert(choice.width_ms==80 && e.foot_span_requested_ms==80);
+  assert(choice.width_ms==80 && e.foot_span_requested_ms==0);
   assert(!e.span_selected && !r.status_.emergency_stop);
  }
  {ExperimentRunner r;Event e;r.gradual_start_.peak(1,11,300,true,300);
   assert(!r.selectFootPhaseOutput(e,350,7.8,choice,current,table));
   assert(!r.status_.emergency_stop);
  }
- std::cout<<"actual runner foot feedback below target and sensor gate PASS\n";
+ std::cout<<"actual runner fallback isolation and sensor gate PASS\n";
 }
 '''
 with tempfile.TemporaryDirectory(prefix='side_priority_runner_') as td:

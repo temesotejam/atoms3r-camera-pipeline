@@ -2568,7 +2568,10 @@ void ExperimentRunner::resetEnergyControlAutonomous() {
   foot_balance_.reset(status_.run_id);foot_energy_.reset(status_.run_id);wheel_speed_balance_.reset();gradual_start_.reset();foot_frame_run_id_=0;
   foot_phase_observer_.reset(status_.run_id);foot_phase_cap_.reset();phase_observer_sequence_=0;
   foot_span_observer_.reset(status_.run_id);foot_span_control_.reset();weak_side_assist_.reset();
-  negative_weak_probe_.reset();
+  long_foot_balance_.reset();
+  for(auto& peak:negative_preceding_positive_peaks_)peak=NAN;
+  for(auto& ms:negative_preceding_positive_peak_ms_)ms=0;
+  for(auto& branch:span_positive_branch_)branch=0;
   positive_left_boost_.reset();positive_left_input_=positive_left_boost::Input{};tilt_priority_.reset();wheel_cycle_guard_.reset();span_observer_sequence_=0;
   span_positive_decision_next_=0;
   for (auto& x:span_positive_decisions_) x=SpanPositiveDecision{};
@@ -2939,12 +2942,23 @@ void ExperimentRunner::processFootSpanCycle() {
   const PhaseNegativeDecision* negative=nullptr;
   const SpanPositiveDecision* positive=nullptr;
   const SpanPositiveContext* positive_context=nullptr;
+  float plus_peak=NAN;
+  uint32_t plus_peak_ms=0;
+  uint8_t positive_branch=0;
   unsigned negatives=0,positives=0;
   for(const auto& p:phase_negative_peaks_) if(p.ms && p.ms==span.end_ms)peak=&p;
-  for(const auto& d:phase_negative_decisions_) if(d.ms>span.start_ms && d.ms<span.end_ms) {negative=&d;++negatives;}
+  for(unsigned i=0;i<8;++i) {
+    const auto& d=phase_negative_decisions_[i];
+    if(d.ms>span.start_ms && d.ms<span.end_ms) {
+      negative=&d;plus_peak=negative_preceding_positive_peaks_[i];
+      plus_peak_ms=negative_preceding_positive_peak_ms_[i];++negatives;
+    }
+  }
   for(unsigned i=0;i<8;++i) {
     const auto& d=span_positive_decisions_[i];
-    if(d.ms>span.start_ms && d.ms<span.end_ms) {positive=&d;positive_context=&span_positive_context_[i];++positives;}
+    if(d.ms>span.start_ms && d.ms<span.end_ms) {
+      positive=&d;positive_context=&span_positive_context_[i];positive_branch=span_positive_branch_[i];++positives;
+    }
   }
   foot_span_control::Cycle cycle;
   cycle.start_ms=span.start_ms;cycle.end_ms=span.end_ms;
@@ -2993,7 +3007,16 @@ void ExperimentRunner::processFootSpanCycle() {
       !span.left.single_outlier && !span.right.single_outlier &&
       !span.left.edge_unverified && !span.right.edge_unverified &&
       positives==1 && negatives==1 && peak;
-  foot_span_control_.cycle(cycle);
+  const bool hardware_healthy=imu_ && roller_ && imu_->acquisitionHealthy() &&
+      !imu_->stale(millis()) && roller_->ok() && !status_.emergency_stop &&
+      status_.state==ExperimentState::RUNNING_BATCH_SWEEP;
+  const bool observable=cycle.gap_quality && cycle.gap_allow && cycle.negative_known &&
+      cycle.positive_executed && cycle.positive_ma==1200 && cycle.positive_sign==1 &&
+      cycle.positive_width>0 && positive_branch==15 && std::isfinite(cycle.positive_rate_dps) &&
+      std::isfinite(cycle.positive_rpm) && std::isfinite(cycle.target_mj) &&
+      plus_peak_ms>cycle.start_ms && negative && plus_peak_ms<negative->ms && plus_peak_ms<cycle.end_ms;
+  long_foot_balance_.observe(cycle.start_ms,cycle.end_ms,cycle.left,cycle.right,
+      plus_peak,cycle.negative_peak,observable,hardware_healthy);
 }
 void ExperimentRunner::recordFootPhasePeak(int8_t physical_side,uint32_t peak_ms,float amplitude_deg) {
   foot_balance_.peak(physical_side,peak_ms);
@@ -3028,9 +3051,6 @@ void ExperimentRunner::notifyPositiveLeftPeak(
         energy_control_autonomous_pending_mode_==peak_error_adaptation::Excite);
     if(healthy)
       tilt_priority_.peak(physical_side,peak_ms,amplitude_deg);
-    negative_weak_probe_.peak(physical_side,peak_ms,amplitude_deg,tilt_priority_.target(),
-        paired_time && event.pending_command_matched &&
-        energy_control_autonomous_pending_mode_==peak_error_adaptation::Excite,healthy);
     positive_left_boost_.peak(physical_side,peak_ms,amplitude_deg,
         imu_ && imu_->acquisitionHealthy() && !imu_->stale(millis()) &&
         event.peak_speed_valid && event.peak_speed_age_us<=30000);
@@ -3629,80 +3649,56 @@ bool ExperimentRunner::tryTiltPriorityImpl(
       event.pre_input_wheel_speed_valid && event.pre_input_wheel_speed_age_us<=50000 &&
       std::isfinite(event.pre_input_wheel_speed_rpm);
   if(healthy_out)*healthy_out=in.hardware_healthy;
-  if(!in.hardware_healthy) wheel_cycle_guard_.reset();
+  if(!in.hardware_healthy) {wheel_cycle_guard_.reset();long_foot_balance_.reset();}
   auto choice=tilt_priority_.propose(in);
-  const uint16_t negative_baseline_cap=tilt_priority_.widthLimit(-1);
-  const bool probe_candidate=!stall_rescue_event_ && in.next_side<0 &&
-      choice.selected && !choice.coast && negative_weak_probe_.candidate(
-          t_test_ms,in.target_deg,negative_baseline_cap,in.hardware_healthy);
-  auto probe_choice=choice;
-  if(probe_candidate) {
-    auto probe_in=in;probe_in.negative_cap_extra_ms=5;
-    probe_choice=tilt_priority_.propose(probe_in);
-  }
   if(stall_rescue_event_ && (!choice.selected || choice.coast))return false;
   // Record every accepted healthy crossing, even when ordinary control is
   // selected. It will be paired with the corresponding measured peak.
   if(in.hardware_healthy)tilt_priority_.crossing(in.next_side,t_test_ms);
   if(!choice.selected)return false;
-  // The 1200mA action is unmodeled. Trial a camera-based offset only on the
-  // positive-side pulse, retaining the hardware and historical timing caps.
-  // Actual sent commands, complete cycles and matched negative-side context
-  // are required by foot_span_control before any outcome is evaluated.
+  // Preserve one owner for positive-width feedback. Evaluate its currently
+  // applied setting and new proposal against the identical guard history.
   if(!stall_rescue_event_)weak_side_assist_.interrupt();
   bool foot_adjusted=false;
-  if(!choice.coast && in.next_side>0 && choice.width_ms<=100 && tilt_priority_.target()>=6.f) {
-    foot_span_control_.preferHighCurrentFirst();
+  bool foot_candidate_eligible=false;
+  bool foot_path_active=false;
+  uint16_t foot_guarded_current=0,foot_guarded_candidate=0;
+  const auto wheel_guard_before=wheel_cycle_guard_;
+  if(!stall_rescue_event_ && !choice.coast && in.next_side>0 &&
+      choice.width_ms<=100 && tilt_priority_.target()>=6.f) {
+    foot_path_active=true;
     const uint16_t baseline=choice.width_ms;
     uint16_t cap=tilt_priority_.timingCap(in.next_side,t_test_ms,in.hardware_cap_ms);
-    const uint16_t exploratory_cap=static_cast<uint16_t>(baseline+30u);
+    const uint16_t exploratory_cap=static_cast<uint16_t>(baseline+20u);
     if(cap>exploratory_cap)cap=exploratory_cap;
     if(cap>100)cap=100;
-    event.foot_span_baseline_ms=baseline;
-    event.foot_span_requested_ms=foot_span_control_.limit(t_test_ms,baseline,
-        choice.current_ma,choice.direction,cap,true,event.target_energy_j*1000.f,
-        event.zero_cross_abs_rate_dps,event.pre_input_wheel_speed_rpm);
-    choice.width_ms=event.foot_span_requested_ms;
-    foot_adjusted=choice.width_ms!=baseline;
-  } else if(!choice.coast && in.next_side>0) {
-    // Preserve the gradual startup and never truncate a legitimate ordinary
-    // pulse over the camera experiment's 100 ms cap.
-    (void)foot_span_control_.selectorUnavailable(t_test_ms);
-  }
-  // Apply after camera adjustments, so they cannot undo the wheel guard.
-  // Coast observations also update the pair but never acquire a new pulse.
-  const uint16_t before_wheel_guard=choice.width_ms;
-  // Recompute from the same history if a camera candidate is rejected. The
-  // guard mutates its wheel-pair state, so invoking it twice on the same
-  // instance would not evaluate the ordinary command under the same context.
-  const auto wheel_guard_before=wheel_cycle_guard_;
-  choice.width_ms=wheel_cycle_guard_.limit(in.next_side,event.pre_input_wheel_speed_rpm,
-      in.hardware_healthy,t_test_ms,choice.width_ms);
-  const auto wheel_guard_after_baseline=wheel_cycle_guard_;
-  const uint16_t probe_baseline_ms=choice.width_ms;
-  bool probe_selected=false;
-  if(probe_candidate && probe_choice.selected && !probe_choice.coast &&
-      probe_choice.direction==choice.direction && probe_choice.current_ma==choice.current_ma) {
-    auto probe_guard=wheel_guard_before;
-    probe_choice.width_ms=probe_guard.limit(in.next_side,event.pre_input_wheel_speed_rpm,
-        in.hardware_healthy,t_test_ms,probe_choice.width_ms);
-    event.weak_probe_baseline_ms=probe_baseline_ms;
-    event.weak_probe_requested_ms=probe_choice.width_ms;
-    if(probe_choice.width_ms>choice.width_ms &&
-        probe_choice.width_ms-choice.width_ms<=5) {
-      choice=probe_choice;wheel_cycle_guard_=probe_guard;probe_selected=true;
+    const uint16_t proposed=long_foot_balance_.propose(t_test_ms,baseline,cap,in.hardware_healthy);
+    const uint16_t current=long_foot_balance_.current(baseline,cap);
+    auto ordinary_guard=wheel_guard_before;
+    const uint16_t ordinary_guarded=ordinary_guard.limit(in.next_side,event.pre_input_wheel_speed_rpm,
+        in.hardware_healthy,t_test_ms,baseline);
+    auto current_guard=wheel_guard_before;
+    foot_guarded_current=current_guard.limit(in.next_side,event.pre_input_wheel_speed_rpm,
+        in.hardware_healthy,t_test_ms,current);
+    auto candidate_guard=wheel_guard_before;
+    foot_guarded_candidate=candidate_guard.limit(in.next_side,event.pre_input_wheel_speed_rpm,
+        in.hardware_healthy,t_test_ms,proposed);
+    event.foot_span_baseline_ms=ordinary_guarded;
+    event.foot_span_requested_ms=foot_guarded_candidate;
+    const int guarded_change=static_cast<int>(foot_guarded_candidate)-static_cast<int>(foot_guarded_current);
+    foot_candidate_eligible=foot_guarded_candidate>0 &&
+        (long_foot_balance_.state()==long_foot_balance::Controller::State::Restore ||
+         (guarded_change>=-5 && guarded_change<=5));
+    if(foot_candidate_eligible) {
+      choice.width_ms=foot_guarded_candidate;wheel_cycle_guard_=candidate_guard;
+      foot_adjusted=foot_guarded_candidate!=ordinary_guarded;
+    } else {
+      choice.width_ms=foot_guarded_current;wheel_cycle_guard_=current_guard;
+      foot_adjusted=foot_guarded_current!=ordinary_guarded;
     }
-  }
-  if(in.next_side>0 && choice.width_ms!=before_wheel_guard) {
-    if(foot_adjusted) {
-      wheel_cycle_guard_=wheel_guard_before;
-      choice.width_ms=wheel_cycle_guard_.limit(in.next_side,event.pre_input_wheel_speed_rpm,
-          in.hardware_healthy,t_test_ms,event.foot_span_baseline_ms);
-    }
-    // A truncated camera candidate is not the candidate that was requested.
-    // Send the guarded ordinary baseline, never an untracked residual offset.
-    (void)foot_span_control_.selectorUnavailable(t_test_ms);
-    foot_adjusted=false;
+  } else {
+    choice.width_ms=wheel_cycle_guard_.limit(in.next_side,event.pre_input_wheel_speed_rpm,
+        in.hardware_healthy,t_test_ms,choice.width_ms);
   }
   event.wheel_guard_legacy_ms=wheel_cycle_guard_.legacyWidth();
   event.wheel_guard_extra_ms=wheel_cycle_guard_.extraReduction();
@@ -3728,8 +3724,7 @@ bool ExperimentRunner::tryTiltPriorityImpl(
   event.valid=false;event.output_executed=false;
   if(!choice.coast && !beginEnergyControlAutonomousPulse(run_start_ms_+t_test_ms,t_test_ms,
                                         choice.direction,choice.width_ms,choice.current_ma)) {
-    if(probe_selected)wheel_cycle_guard_=wheel_guard_after_baseline;
-    if(!stall_rescue_event_)negative_weak_probe_.command(in.next_side,t_test_ms,0,negative_baseline_cap,false);
+    if(foot_path_active)wheel_cycle_guard_=wheel_guard_before;
     tilt_priority_.confirm(in.next_side,t_test_ms,choice,false);
     event.command_current_mA=0;event.pulse_width_ms=0;
     event.q_command_direction=0;event.command_matches_zero_cross_motion=false;
@@ -3739,13 +3734,7 @@ bool ExperimentRunner::tryTiltPriorityImpl(
   }
   if(stall_rescue_event_ && !choice.coast)weak_side_assist_.interrupt();
   tilt_priority_.confirm(in.next_side,t_test_ms,choice,true);
-  if(!stall_rescue_event_) {
-    if(probe_selected) {
-      negative_weak_probe_.attempt(t_test_ms,true,probe_baseline_ms,choice.width_ms);
-      event.weak_probe_executed=true;
-    }
-    negative_weak_probe_.command(in.next_side,t_test_ms,choice.width_ms,negative_baseline_cap,!choice.coast);
-  }
+  if(foot_candidate_eligible)long_foot_balance_.confirm(t_test_ms,foot_guarded_current,foot_guarded_candidate,!choice.coast);
   event.valid=true;event.output_executed=!choice.coast;
   event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_selected,
       foot_adjusted && event.output_executed);
@@ -3897,62 +3886,26 @@ bool ExperimentRunner::selectFootPhaseOutput(
     PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,uint32_t t_test_ms,float fast_v,
     wheel_work_energy_control::Choice& work_choice,int16_t& selected_current_mA,
     const lateral_energy::CurrentTable*& selected_current_table) {
-  bool phase_skip_output=false;
+  (void)t_test_ms;(void)fast_v;(void)selected_current_mA;(void)selected_current_table;
+  // The long-term controller owns branch 15 only. Fallback remains ordinary
+  // control while retaining the established stale sensor and hardware gate.
   if(wheelWorkMode() && event.target_peak_deg==8.f && event.physical_next_peak_side>0) {
-    event.foot_span_baseline_ms=work_choice.valid ? work_choice.width_ms : 0;
-    const bool phase_sensors_fresh=peak_error_adaptation::speedUsable(event.pre_input_wheel_speed_rpm,
+    long_foot_balance_.reset();
+    const bool healthy=peak_error_adaptation::speedUsable(event.pre_input_wheel_speed_rpm,
         event.pre_input_wheel_speed_valid,event.pre_input_wheel_speed_age_us) &&
         event.vbat_mV>0 && !event.side_mismatch_diagnostic && !status_.emergency_stop &&
         status_.state==ExperimentState::RUNNING_BATCH_SWEEP && roller_ && roller_->ok() &&
         imu_ && imu_->acquisitionHealthy() && !imu_->stale(millis());
-    const bool selector_eligible=work_choice.valid && foot_span_candidate::supportedBranch(work_choice.branch) && work_choice.command_sign==1 &&
-        (work_choice.current_ma==300 || work_choice.current_ma==350 || work_choice.current_ma==400);
-    if(!phase_sensors_fresh) {
-      // A real stale/missing sensor or hardware fault is not model coverage.
-      // Suppress this crossing explicitly, irrespective of selector fallback.
-      (void)foot_span_control_.limit(t_test_ms,event.foot_span_baseline_ms,
-          work_choice.current_ma,work_choice.command_sign,work_choice.allowed_cap_ms,false,event.target_energy_j*1000.f,
-          event.zero_cross_abs_rate_dps,event.pre_input_wheel_speed_rpm);
+    if(!healthy) {
       event.reason=status_.emergency_stop || status_.state!=ExperimentState::RUNNING_BATCH_SWEEP
           ? Config::ENERGY_CONTROL_AUTONOMOUS_REASON_ESTOP_OR_STATE
           : (!roller_ || !roller_->ok() ? Config::ENERGY_CONTROL_AUTONOMOUS_REASON_ROLLER_NOT_READY
                                        : Config::ENERGY_CONTROL_AUTONOMOUS_REASON_NONFINITE_STATE);
       return true;
     }
-    if(!selector_eligible) {
-      // An unavailable or different model/selector is not a hardware fault.
-      // Reacquire the baseline without suppressing the ordinary fallback.
-      if(!foot_span_control_.selectorUnavailable(t_test_ms)) {
-        requestEmergencyStop("foot_span_command_unresolved");return true;
-      }
-      return false;
-    }
-    // Judge the gait correction from completed, quality-checked foot cycles.
-    // A positive peak below its target must not erase this feedback: in the
-    // recorded walk that condition held throughout, so correction never ran.
-    // If a cycle is missing or stale, the controller returns the baseline.
-    const uint16_t limited=foot_span_control_.limit(t_test_ms,event.foot_span_baseline_ms,
-        work_choice.current_ma,work_choice.command_sign,work_choice.allowed_cap_ms,true,event.target_energy_j*1000.f,
-        event.zero_cross_abs_rate_dps,event.pre_input_wheel_speed_rpm);
-    event.foot_span_requested_ms=limited;
-    if(foot_span_control_.requireNeutral()) {
-      requestEmergencyStop("foot_span_command_unresolved");phase_skip_output=true;
-    } else if(limited==0 && work_choice.width_ms>0) phase_skip_output=true;
-    else if(limited!=work_choice.width_ms) {
-      auto candidate=chooseFootPhaseWidth(event,work_choice,limited,fast_v);
-      if(!candidate.valid) {
-        // A candidate that was never sent is not an actuator fault. The
-        // ordinary selector remains in effect if a safe return is possible.
-        if(!foot_span_control_.cancelUnsent(work_choice.width_ms)) phase_skip_output=true;
-      } else {
-        work_choice=candidate;selected_current_mA=candidate.current_ma;
-        selected_current_table=candidate.current_ma==350 ? &positive_current_probe_tables_[0] :
-            candidate.current_ma==400 ? &positive_current_probe_tables_[1] : &lateral_current_table_;
-        event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_selected, true);
-      }
-    }
   }
-  return phase_skip_output;
+  (void)work_choice;
+  return false;
 }
 
 void ExperimentRunner::choosePeakMpc(PsramLogger::EnergyControlAutonomousZeroCrossEvent& event,
@@ -4097,6 +4050,10 @@ void ExperimentRunner::finishFootEnergyDecision(PsramLogger::EnergyControlAutono
   if(wheelWorkMode() && event.target_peak_deg==8.f) {
     if(event.physical_next_peak_side<0) {
       auto& d=phase_negative_decisions_[phase_negative_decision_next_];
+      negative_preceding_positive_peaks_[phase_negative_decision_next_]=
+          event.previous_peak_side>0 ? event.previous_peak_amplitude_deg : NAN;
+      negative_preceding_positive_peak_ms_[phase_negative_decision_next_]=
+          event.previous_peak_side>0 ? event.previous_peak_time_ms : 0;
       d.ms=t_ms;
       d.value=foot_phase_cap::classifyNegative(event.valid,event.output_executed,
           event.reason==Config::ENERGY_CONTROL_AUTONOMOUS_REASON_NONE,
@@ -4116,6 +4073,7 @@ void ExperimentRunner::finishFootEnergyDecision(PsramLogger::EnergyControlAutono
             event.pulse_width_ms,event.q_command_direction,event.valid && event.output_executed);
       auto& d=span_positive_decisions_[span_positive_decision_next_];
       auto& context=span_positive_context_[span_positive_decision_next_];
+      span_positive_branch_[span_positive_decision_next_]=event.work_control_branch;
       d.ms=t_ms;d.width=event.pulse_width_ms;d.ma=event.command_current_mA;
       d.sign=event.q_command_direction;d.target_mj=event.target_energy_j*1000.f;
       context.rate_dps=event.zero_cross_abs_rate_dps;
@@ -4123,12 +4081,7 @@ void ExperimentRunner::finishFootEnergyDecision(PsramLogger::EnergyControlAutono
           ? event.pre_input_wheel_speed_rpm : NAN;
       d.executed=event.output_executed;
       span_positive_decision_next_=(span_positive_decision_next_+1)%8;
-      if(event.work_control_branch==15 && (event.pulse_width_ms>100 || tilt_priority_.target()<6.f)) {
-        (void)foot_span_control_.selectorUnavailable(t_ms);
-      } else {
-        foot_span_control_.confirm(t_ms,event.output_executed,event.command_current_mA,
-            event.q_command_direction,event.pulse_width_ms);
-      }
+
     }
     // Legacy signed-phase event fields are no longer persisted; raw foot
     // frames and body peak records remain available for offline reconstruction.
@@ -4136,8 +4089,8 @@ void ExperimentRunner::finishFootEnergyDecision(PsramLogger::EnergyControlAutono
     event.foot_span_left_deg=span.left.span;event.foot_span_right_deg=span.right.span;
     event.foot_span_trimmed_left_deg=span.left.trimmed_span;event.foot_span_trimmed_right_deg=span.right.trimmed_span;
     event.foot_span_start_ms=span.start_ms;event.foot_span_end_ms=span.end_ms;
-    event.foot_span_state=static_cast<uint8_t>(foot_span_control_.state());
-    event.foot_span_accepted_cycles=static_cast<uint8_t>(foot_span_control_.acceptedProbeCycles());
+    event.foot_span_state=static_cast<uint8_t>(long_foot_balance_.state());
+    event.foot_span_accepted_cycles=static_cast<uint8_t>(long_foot_balance_.samples());
     event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_startup, span.startup);event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_continuous, span.continuous);
     event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_left_low, span.left.low_signal);event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_right_low, span.right.low_signal);
     event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_left_outlier, span.left.single_outlier);event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::Span_right_outlier, span.right.single_outlier);
@@ -4155,8 +4108,6 @@ void ExperimentRunner::finishFootEnergyDecision(PsramLogger::EnergyControlAutono
     foot_energy_.decision(t_ms,event.physical_next_peak_side,supported,event.q_command_mA_s,
         event.pre_input_wheel_speed_rpm,event.vbat_mV);
     event.foot_energy_phase=foot_energy_.phase();event.foot_energy_reason=foot_energy_.reason();
-    if(foot_span_control_.requireNeutral() && !status_.emergency_stop)
-      requestEmergencyStop("foot_span_command_unresolved");
   }
   if(wheelWorkMode() && event.target_peak_deg==8.f && event.physical_next_peak_side>0)
     low_peak_feedback_.command(t_ms,event.physical_next_peak_side,event.output_executed,event.command_current_mA,

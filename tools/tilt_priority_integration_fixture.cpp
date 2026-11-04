@@ -1,7 +1,7 @@
 #define FOOT_TREND_CYCLES 2
 #include "tilt_priority.h"
 #include "stall_rescue.h"
-#include "negative_weak_probe.h"
+#include "long_foot_balance.h"
 #include "wheel_cycle_guard.h"
 #include "foot_span_control.h"
 #include "peak_error_adaptation.h"
@@ -49,7 +49,7 @@ class ExperimentRunner {public:
  Status status_;Imu imu_obj;Roller roller_obj;Imu* imu_=&imu_obj;Roller* roller_=&roller_obj;
  tilt_priority::Controller tilt_priority_;foot_span_control::Controller foot_span_control_;
  wheel_cycle_guard::Controller wheel_cycle_guard_;
- negative_weak_probe::Controller negative_weak_probe_;
+ long_foot_balance::Controller long_foot_balance_;
  Resettable weak_side_assist_,walking_loss_feedback_,walking_low_speed_guard_;
  Adaptive adaptive_cg_;bool mode=true,begin_ok=true;unsigned calls=0;int sign=0,ma=0;uint16_t width=0;
  float run_cg_shift_mm_=0,pending_cg_shift_mm_=0,pending_target_energy_j_=NAN;
@@ -73,43 +73,6 @@ class ExperimentRunner {public:
 // METHOD_SOURCE
 using Event=PsramLogger::EnergyControlAutonomousZeroCrossEvent;
 int main(){
- // Construct a mature stage with real paired tilt observations and separately
- // feed four valid weak-side observations to the experimental tracker.
- auto prepare_probe=[](ExperimentRunner& r,bool timing_block) {
-  uint32_t t=1000;r.tilt_priority_.peak(1,100,2.f);
-  auto peak=[&](int side,float angle,uint32_t delay) {
-    tilt_priority::Choice c;c.selected=true;c.coast=true;c.direction=side;c.target_deg=r.tilt_priority_.target();
-    r.tilt_priority_.crossing(side,t);r.tilt_priority_.confirm(side,t,c,true);
-    r.tilt_priority_.peak(side,t+delay,angle);t+=300;
-  };
-  while(r.tilt_priority_.target()<8.f){peak(-1,3.f,100);peak(1,3.f,100);}
-  for(int i=0;i<4;++i) {
-    uint32_t pos=t+100;peak(1,6.f,100);
-    r.negative_weak_probe_.peak(1,pos,6.f,8.f,true,true);
-    r.negative_weak_probe_.command(-1,t,58,60,true);
-    uint32_t neg=t+(timing_block?80:150);peak(-1,3.5f,timing_block?80:150);
-    r.negative_weak_probe_.peak(-1,neg,3.5f,8.f,true,true);
-  }
-  uint32_t pos=t+100;peak(1,6.f,100);r.negative_weak_probe_.peak(1,pos,6.f,8.f,true,true);
-  assert(r.negative_weak_probe_.candidate(t,8.f,60,true));return t;
- };
- {ExperimentRunner r;auto t=prepare_probe(r,false);Event e;e.physical_next_peak_side=-1;
-  assert(r.tryTiltPriority(e,t));assert(e.output_executed && e.weak_probe_executed);
-  assert(e.weak_probe_baseline_ms==60 && e.weak_probe_requested_ms==65 && e.pulse_width_ms==65);
-  assert(r.negative_weak_probe_.attempted());}
- {ExperimentRunner r;auto t=prepare_probe(r,false);
-  r.wheel_cycle_guard_.limit(1,-400.f,true,t-100,60);
-  Event e;e.physical_next_peak_side=-1;e.pre_input_wheel_speed_rpm=-400.f;
-  assert(r.tryTiltPriority(e,t));assert(e.output_executed && e.weak_probe_executed);
-  assert(e.weak_probe_baseline_ms==45 && e.weak_probe_requested_ms==49 && e.pulse_width_ms==49);}
- {ExperimentRunner r;auto t=prepare_probe(r,true);Event e;e.physical_next_peak_side=-1;
-  assert(r.tryTiltPriority(e,t));assert(e.output_executed && !e.weak_probe_executed);
-  assert(e.weak_probe_baseline_ms==50 && e.weak_probe_requested_ms==50 && e.pulse_width_ms==50);
-  assert(!r.negative_weak_probe_.attempted());}
- {ExperimentRunner r;auto t=prepare_probe(r,false);r.begin_ok=false;Event e;e.physical_next_peak_side=-1;
-  assert(r.tryTiltPriority(e,t));assert(!e.output_executed && !e.weak_probe_executed);
-  assert(e.weak_probe_baseline_ms==60 && e.weak_probe_requested_ms==65);
-  assert(!r.negative_weak_probe_.attempted());}
  // The real dispatch records the old limit and bounded additional change.
  {ExperimentRunner r;
   r.wheel_cycle_guard_.peak(-1,5.3f,100,true);r.wheel_cycle_guard_.peak(1,5.4f,450,true);
@@ -125,43 +88,10 @@ int main(){
  {ExperimentRunner r;Event e;assert(r.tryTiltPriority(e,500));
   assert(e.output_executed && e.pulse_width_ms==60 && e.foot_span_baseline_ms==0);
   assert(!(e.foot_span_flags & Event::Span_selected));}
- // Two measured imbalanced completed cycles prepare an actual 1200mA
- // pulse trial. This tests dispatch, not the response of the real robot.
- {ExperimentRunner r;uint32_t t=1000;r.tilt_priority_.peak(1,100,2.f);
-  for(int n=0;n<6;++n)for(int side: {-1,1}) {
-    tilt_priority::Choice coast;coast.selected=true;coast.coast=true;
-    coast.direction=static_cast<int8_t>(side);coast.target_deg=r.tilt_priority_.target();
-    r.tilt_priority_.crossing(static_cast<int8_t>(side),t);
-    r.tilt_priority_.confirm(static_cast<int8_t>(side),t,coast,true);
-    r.tilt_priority_.peak(static_cast<int8_t>(side),t+100,3.f);t+=300;
-  }
-  assert(r.tilt_priority_.target()==6.f);r.foot_span_control_.preferHighCurrentFirst();
-  for(unsigned start: {t+100,t+200}) {
-    auto w=r.foot_span_control_.limit(start+50,60,1200,1,90,true,1.f);
-    r.foot_span_control_.confirm(start+50,true,1200,1,w);
-    foot_span_control::Cycle c;c.start_ms=start;c.end_ms=start+100;c.positive_ms=start+50;
-    c.left=3;c.right=1;c.negative_peak=5;c.target_mj=1;c.negative_key=1;
-    c.positive_width=w;c.positive_ma=1200;c.positive_sign=1;
-    c.complete=c.negative_known=c.positive_executed=true;r.foot_span_control_.cycle(c);
-  }
-  assert(r.foot_span_control_.offset()==5);
-  Event neg;neg.physical_next_peak_side=-1;
-  assert(r.tryTiltPriority(neg,t+350));
-  assert(neg.output_executed && r.foot_span_control_.offset()==5);
-  assert(!(neg.foot_span_flags & Event::Span_selected));
-  Event e;assert(r.tryTiltPriority(e,t+400));
-  assert(e.valid && e.output_executed && e.foot_span_baseline_ms==60 && e.foot_span_requested_ms==65);
-  assert(e.pulse_width_ms==65 && r.width==65 && (e.foot_span_flags & Event::Span_selected));
-  r.foot_span_control_.confirm(t+400,true,1200,1,65);
-  assert(r.foot_span_control_.acceptedProbeCycles()==1);
- }
- // The actual runner must cancel a camera candidate if the wheel guard
- // truncates it, and apply the guard to the ordinary baseline instead.
- // Here an unguarded 30 ms baseline and 35 ms candidate would become 27
- // and 32 ms respectively. The latter must never leak out as an untracked
- // camera intervention. Both guard paths start with the very same history.
- for(int with_candidate=0;with_candidate<2;++with_candidate) {
-  ExperimentRunner r;uint32_t t=1000;r.tilt_priority_.peak(1,100,2.f);
+ // Five valid observations qualify a proposal. These inputs verify dispatch,
+ // not physical foot response. Guard comparisons use identical wheel history.
+ auto prepare_foot=[](ExperimentRunner& r) {
+  uint32_t t=1000;r.tilt_priority_.peak(1,100,2.f);
   for(int n=0;n<6;++n)for(int side: {-1,1}) {
     tilt_priority::Choice coast;coast.selected=true;coast.coast=true;
     coast.direction=static_cast<int8_t>(side);coast.target_deg=r.tilt_priority_.target();
@@ -170,35 +100,36 @@ int main(){
     r.tilt_priority_.peak(static_cast<int8_t>(side),t+100,3.f);t+=300;
   }
   assert(r.tilt_priority_.target()==6.f);
-  r.foot_span_control_.preferHighCurrentFirst();
-  if(with_candidate) {
-    for(unsigned i=0;i<2;++i) {
-      const unsigned start=t+100+i*100;
-      const auto w=r.foot_span_control_.limit(start+50,30,1200,1,60,true,1.f,60.f,400.f);
-      assert(w==30);r.foot_span_control_.confirm(start+50,true,1200,1,w);
-      foot_span_control::Cycle c;c.start_ms=start;c.end_ms=start+100;c.positive_ms=start+50;
-      c.left=3;c.right=1;c.negative_peak=5;c.target_mj=1;c.negative_key=1;
-      c.negative_trigger_deg=static_cast<float>(i);c.positive_rate_dps=60;c.positive_rpm=400;
-      c.positive_width=w;c.positive_ma=1200;c.positive_sign=1;
-      c.complete=c.negative_known=c.positive_executed=true;r.foot_span_control_.cycle(c);
-    }
-    assert(r.foot_span_control_.offset()==5);
-    assert(r.foot_span_control_.state()==foot_span_control::State::ProbeOnce);
-  }
-  (void)r.wheel_cycle_guard_.limit(-1,100.f,true,t+350,30);
-  auto expected=r.wheel_cycle_guard_;
-  assert(expected.limit(1,400.f,true,t+400,30)==27);
-  Event e;e.zero_cross_abs_rate_dps=60.f;e.pre_input_wheel_speed_rpm=400.f;
-  assert(r.tryTiltPriority(e,t+400));
-  assert(e.valid && e.output_executed && e.foot_span_baseline_ms==30);
-  assert(e.foot_span_requested_ms==(with_candidate?35:30));
-  assert(e.pulse_width_ms==27 && r.width==27 && e.wheel_guard_legacy_ms==27);
-  assert(!(e.foot_span_flags & Event::Span_selected));
-  assert(r.foot_span_control_.offset()==0 && r.foot_span_control_.acceptedProbeCycles()==0);
-  // Next update must see the same history as one guard application, not two.
-  assert(r.wheel_cycle_guard_.limit(-1,200.f,true,t+700,40)==
-         expected.limit(-1,200.f,true,t+700,40));
- }
+  for(int i=0;i<5;++i)r.long_foot_balance_.observe(t-600+i*100,t-500+i*100,3.f,1.f,6.f,5.f,true,true);
+  return t;
+ };
+ {ExperimentRunner r;auto t=prepare_foot(r);Event e;
+  assert(r.tryTiltPriority(e,t));assert(e.output_executed && e.pulse_width_ms==65);
+  assert(e.foot_span_baseline_ms==60 && e.foot_span_requested_ms==65);
+  assert(e.foot_span_flags & Event::Span_selected);assert(r.long_foot_balance_.offset()==5);
+  Event held;assert(r.tryTiltPriority(held,t+200));
+  assert(held.pulse_width_ms==65 && held.foot_span_baseline_ms==60 && held.foot_span_requested_ms==65);
+  assert(held.foot_span_flags & Event::Span_selected);assert(r.long_foot_balance_.offset()==5);}
+ {ExperimentRunner r;auto t=prepare_foot(r);
+  r.wheel_cycle_guard_.limit(-1,400.f,true,t-100,60);
+  auto expected=r.wheel_cycle_guard_;assert(expected.limit(1,400.f,true,t,65)==49);
+  Event e;e.pre_input_wheel_speed_rpm=400.f;
+  assert(r.tryTiltPriority(e,t));assert(e.output_executed && e.pulse_width_ms==49);
+  assert(e.foot_span_baseline_ms==45 && e.foot_span_requested_ms==49);
+  assert(e.foot_span_flags & Event::Span_selected);assert(r.long_foot_balance_.offset()==5);
+  assert(r.wheel_cycle_guard_.limit(-1,200.f,true,t+300,40)==expected.limit(-1,200.f,true,t+300,40));}
+ {ExperimentRunner r;auto t=prepare_foot(r);r.begin_ok=false;Event e;
+  r.wheel_cycle_guard_.limit(-1,300.f,true,t-100,60);auto untouched=r.wheel_cycle_guard_;
+  assert(r.tryTiltPriority(e,t));assert(!e.output_executed && !(e.foot_span_flags & Event::Span_selected));
+  assert(r.long_foot_balance_.offset()==0);
+  assert(r.wheel_cycle_guard_.limit(1,300.f,true,t+100,60)==untouched.limit(1,300.f,true,t+100,60));}
+ {ExperimentRunner r;auto t=prepare_foot(r);
+  tilt_priority::Choice coast;coast.selected=true;coast.coast=true;coast.direction=1;coast.target_deg=6;
+  r.tilt_priority_.crossing(1,t-100);r.tilt_priority_.confirm(1,t-100,coast,true);
+  r.tilt_priority_.peak(1,t-10,3.f);
+  Event e;assert(r.tryTiltPriority(e,t));assert(e.output_executed && e.pulse_width_ms==60);
+  assert(e.foot_span_baseline_ms==60 && e.foot_span_requested_ms==60);
+  assert(!(e.foot_span_flags & Event::Span_selected));assert(r.long_foot_balance_.offset()==0);}
  // The optional camera trial must never silently cap an ordinary 1200 mA
  // positive pulse at 100 ms. Grow the existing ramp through actual paired
  // peak/command confirmations, then test the real runner dispatch.
