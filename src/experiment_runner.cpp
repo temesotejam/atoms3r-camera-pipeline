@@ -3033,7 +3033,7 @@ void ExperimentRunner::processFootSpanCycle() {
   const bool negative_was_active=negative_cap_recovery_.active();
   negative_cap_recovery_.footCycle(span.start_ms,span.end_ms,cycle.left,cycle.right,
       observable,hardware_healthy,neutral_foot_context);
-  long_foot_balance_.observe(cycle.start_ms,cycle.end_ms,cycle.left,cycle.right,
+  long_foot_balance_.observeCycle(cycle.start_ms,cycle.end_ms,cycle.left,cycle.right,
       plus_peak,cycle.negative_peak,observable && negative_cap_recovery::normalFootReferenceAllowed(
           negative_was_active,negative_cap_recovery_.active(),span.start_ms,negative_recovery_last_applied_ms_),hardware_healthy,
       positives==1 && positive && positive->executed &&
@@ -3677,7 +3677,13 @@ bool ExperimentRunner::tryTiltPriorityImpl(
   if(healthy_out)*healthy_out=in.hardware_healthy;
   if(!in.hardware_healthy) {wheel_cycle_guard_.reset();long_foot_balance_.reset();}
   // The timeout and unhealthy hardware must cancel even on a positive input.
-  const uint16_t active_negative_extra=negative_cap_recovery_.extraCap(t_test_ms,in.hardware_healthy);
+  // The v1.0.91 negative-side probe did not improve the observed run. Keep
+  // its audit/observer code, but suppress new or continuing interventions
+  // until its physical response can be identified independently.
+  const bool negative_recovery_enabled=false;
+  if(!negative_recovery_enabled)negative_cap_recovery_.interrupt();
+  const uint16_t active_negative_extra=negative_recovery_enabled ?
+      negative_cap_recovery_.extraCap(t_test_ms,in.hardware_healthy) : 0;
   auto choice=tilt_priority_.propose(in);
   if(stall_rescue_event_)negative_cap_recovery_.interrupt();
   if(stall_rescue_event_ && (!choice.selected || choice.coast))return false;
@@ -3731,9 +3737,9 @@ bool ExperimentRunner::tryTiltPriorityImpl(
       foot_adjusted=foot_guarded_current!=ordinary_guarded;
     }
   } else if(!stall_rescue_event_ && !choice.coast && in.next_side<0) {
-    negative_probe_start=negative_cap_recovery_.candidate(t_test_ms,in.target_deg,
+    negative_probe_start=negative_recovery_enabled && negative_cap_recovery_.candidate(t_test_ms,in.target_deg,
         tilt_priority_.widthLimit(-1),long_foot_balance_.idleForNegativeTrial(),in.hardware_healthy);
-    negative_probe_path=negative_probe_start || (negative_cap_recovery_.active() && active_negative_extra>0);
+    negative_probe_path=negative_recovery_enabled && (negative_probe_start || (negative_cap_recovery_.active() && active_negative_extra>0));
     auto ordinary_guard=wheel_guard_before;
     negative_guarded_baseline=ordinary_guard.limit(in.next_side,event.pre_input_wheel_speed_rpm,
         in.hardware_healthy,t_test_ms,choice.width_ms);

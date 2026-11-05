@@ -124,4 +124,43 @@ int main(){
   const float settled_m[]={5.587f,6.155f,5.282f,5.995f,5.534f};
   for(unsigned i=0;i<5;++i)sample(replay,6000+i*1000,1.75f,.585f,settled[i],settled_m[i]);
   assert(replay.propose(10100,60,100,true)==65);
+  // Real runner path: three disjoint pairs = six complete camera cycles.
+  // Preserve the right-small -> following-left-large order in each pair.
+  Controller pairs;
+  for(unsigned i=0;i<6;++i) {
+    const unsigned s=1000+i*700,e=s+700;
+    pairs.observeCycle(s,e,(i%2)?4.f:3.f,.5f,6.f,5.f,true,true,true);
+    if(i<5)assert(pairs.propose(e+1,60,100,true)==60);
+  }
+  assert(pairs.propose(5201,60,100,true)==65);
+  pairs.confirm(5300,60,65,true);
+  // Skip the pair containing the changed input; keep its alternating phase.
+  pairs.observeCycle(5200,5900,3,.5f,6,5,true,true,true);
+  pairs.observeCycle(5900,6600,4,.5f,6,5,true,true,true);
+  for(unsigned i=0;i<6;++i) {
+    const unsigned s=6600+i*700,e=s+700;
+    // Ratio and right foot improve, but next-left following weak right has
+    // grown: the sequence-specific safety objective rejects the trial.
+    pairs.observeCycle(s,e,(i%2)?5.f:3.f,1.f,6.f,5.f,true,true,true);
+  }
+  assert(pairs.state()==Controller::State::Restore);
+  Controller gaps;
+  gaps.observeCycle(100,200,3,.5f,6,5,true,true,true);
+  gaps.observeCycle(200,300,0,0,6,5,false,true,true);
+  gaps.observeCycle(300,400,4,.5f,6,5,true,true,true);
+  assert(gaps.samples()==0); // never form a pair across a missing cycle
+  gaps.observeCycle(400,500,4,.5f,6,5,true,true,true);
+  assert(gaps.samples()==1); // phase anchored across the known invalid cycle
+  Controller pairing_safety;
+  for(unsigned i=0;i<6;++i)pairing_safety.observeCycle(1000+i*700,1700+i*700,3,.5f,6,5,true,true,true);
+  pairing_safety.confirm(5300,60,65,true);
+  pairing_safety.observeCycle(5400,6100,0,0,3,5,false,true,false);
+  assert(pairing_safety.state()==Controller::State::Restore); // no waiting for pair
+  Controller phase_gap;
+  for(unsigned i=0;i<6;++i)phase_gap.observeCycle(1000+i*700,1700+i*700,3,.5f,6,5,true,true,true);
+  phase_gap.confirm(5300,60,65,true);
+  // An unknown missing boundary loses phase, so response cannot be compared
+  // with the pre-change sequence window; restore the prior pulse setting.
+  phase_gap.observeCycle(7000,7700,3,.5f,6,5,true,true,true);
+  assert(phase_gap.state()==Controller::State::Restore);
 }

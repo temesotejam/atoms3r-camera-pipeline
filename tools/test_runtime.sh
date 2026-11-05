@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 python3 tools/embed_runtime_web.py --check
+python3 tools/test_foot_log_version_mapping.py
 
 g++ -std=c++11 -O2 -Wall -Wextra -Werror -Isrc tools/test_weak_side_assist.cpp -o /tmp/test_weak_side_assist
 /tmp/test_weak_side_assist

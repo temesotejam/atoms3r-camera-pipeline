@@ -106,13 +106,13 @@ int main(){
   assert(r.negative_cap_recovery_.candidate(t,8.f,30,true,true));
   return t;
  };
- // The first send and each held pulse use the same pre-guard history.
+ // Even when all old negative-recovery evidence is present, the ordinary
+ // protected command is sent and the trial cannot start.
  {ExperimentRunner r;auto t=prepare_negative(r);Event e;e.physical_next_peak_side=-1;
-  assert(r.tryTiltPriority(e,t));assert(e.output_executed && e.pulse_width_ms==35);
-  assert(e.weak_probe_baseline_ms==30 && e.weak_probe_requested_ms==35 && e.weak_probe_executed);
-  assert(r.negative_cap_recovery_.active());
+  assert(r.tryTiltPriority(e,t));assert(e.output_executed && e.pulse_width_ms==30);
+  assert(!e.weak_probe_executed && !r.negative_cap_recovery_.active());
   Event held;held.physical_next_peak_side=-1;assert(r.tryTiltPriority(held,t+300));
-  assert(held.pulse_width_ms==35 && held.weak_probe_executed);}
+  assert(held.pulse_width_ms==30 && !held.weak_probe_executed);}
  // A rejected send cannot start the trial or advance its output history.
  {ExperimentRunner r;auto t=prepare_negative(r);r.begin_ok=false;Event e;e.physical_next_peak_side=-1;
   const auto guard_before=r.wheel_cycle_guard_;
@@ -124,9 +124,8 @@ int main(){
   r.wheel_cycle_guard_.limit(1,-400.f,true,t-100,60);auto reference=r.wheel_cycle_guard_;
   assert(reference.limit(-1,-400.f,true,t,35)==27);
   Event e;e.physical_next_peak_side=-1;e.pre_input_wheel_speed_rpm=-400.f;
-  assert(r.tryTiltPriority(e,t));assert(e.output_executed && e.pulse_width_ms==27);
-  assert(e.weak_probe_baseline_ms==23 && e.weak_probe_requested_ms==27 && e.weak_probe_executed);
-  assert(r.negative_cap_recovery_.active());}
+  assert(r.tryTiltPriority(e,t));assert(e.output_executed && e.pulse_width_ms==23);
+  assert(!e.weak_probe_executed && !r.negative_cap_recovery_.active());}
  // A timing cap that makes both candidates equal is not a successful probe.
  {ExperimentRunner r;auto t=prepare_negative(r);
   tilt_priority::Choice c;c.selected=true;c.direction=-1;c.width_ms=30;c.current_ma=1200;c.target_deg=8;
@@ -134,40 +133,14 @@ int main(){
   r.tilt_priority_.peak(-1,t-340,3.f);
   Event e;e.physical_next_peak_side=-1;assert(r.tryTiltPriority(e,t));
   assert(e.output_executed && e.pulse_width_ms==30);
-  assert(e.weak_probe_baseline_ms==30 && e.weak_probe_requested_ms==30 && !e.weak_probe_executed);
+  assert(!e.weak_probe_executed);
   assert(!r.negative_cap_recovery_.active() && !r.negative_cap_recovery_.attempted());}
- // Active negative trial blocks the normal positive foot proposal.
- {ExperimentRunner r;auto t=prepare_negative(r);Event e;e.physical_next_peak_side=-1;
-  assert(r.tryTiltPriority(e,t));assert(r.negative_cap_recovery_.active());
-  Event positive;positive.physical_next_peak_side=1;assert(r.tryTiltPriority(positive,t+100));
-  assert(positive.output_executed && !(positive.foot_span_flags&Event::Span_selected));}
- // A temporary trial can equal the ordinary cap by coincidence after taper.
- // It must not train the permanent cap up, but overshoot must still reduce it.
+ // A legacy active probe is cancelled and cannot block the positive path.
  {ExperimentRunner r;auto t=prepare_negative(r);
-  for(int n=0;n<2;++n) {
-   const auto pulse=t+n*600;Event e;e.physical_next_peak_side=-1;e.zero_cross_abs_rate_dps=53.3f;
-   assert(r.tryTiltPriority(e,pulse));assert(e.weak_probe_executed);
-   assert(e.weak_probe_baseline_ms==26 && e.pulse_width_ms==30);
-   r.tilt_priority_.peak(-1,pulse+100,5.f);
-   tilt_priority::Choice c;c.selected=true;c.coast=true;c.direction=1;c.target_deg=8.f;
-   r.tilt_priority_.crossing(1,pulse+200);r.tilt_priority_.confirm(1,pulse+200,c,true);
-   r.tilt_priority_.peak(1,pulse+300,3.f);
-  }
-  assert(r.tilt_priority_.widthLimit(-1)==30);
-  const auto pulse=t+1200;Event over;over.physical_next_peak_side=-1;over.zero_cross_abs_rate_dps=53.3f;
-  assert(r.tryTiltPriority(over,pulse));assert(over.weak_probe_executed);
-  r.tilt_priority_.peak(-1,pulse+100,10.f);
-  tilt_priority::Choice c;c.selected=true;c.coast=true;c.direction=1;c.target_deg=8.f;
-  r.tilt_priority_.crossing(1,pulse+200);r.tilt_priority_.confirm(1,pulse+200,c,true);
-  r.tilt_priority_.peak(1,pulse+300,3.f);
-  assert(r.tilt_priority_.widthLimit(-1)==20);}
- // Loss of wheel-work mode cancels the experiment; it may not restart in
- // the same run merely because the mode later becomes available again.
- {ExperimentRunner r;auto t=prepare_negative(r);Event e;e.physical_next_peak_side=-1;
-  assert(r.tryTiltPriority(e,t));assert(r.negative_cap_recovery_.active());r.mode=false;
-  Event fail;fail.physical_next_peak_side=-1;assert(!r.tryTiltPriority(fail,t+200));
-  assert(!r.negative_cap_recovery_.active() && r.negative_cap_recovery_.attempted());r.mode=true;
-  assert(!r.negative_cap_recovery_.candidate(t+300,8.f,30,true,true));}
+  r.negative_cap_recovery_.command(t-100,30,35,true,true);
+  assert(r.negative_cap_recovery_.active());
+  Event positive;positive.physical_next_peak_side=1;assert(r.tryTiltPriority(positive,t));
+  assert(positive.output_executed && !r.negative_cap_recovery_.active());}
  // The real dispatch records the old limit and bounded additional change.
  {ExperimentRunner r;
   r.wheel_cycle_guard_.peak(-1,5.3f,100,true);r.wheel_cycle_guard_.peak(1,5.4f,450,true);
@@ -198,6 +171,15 @@ int main(){
   for(int i=0;i<5;++i)r.long_foot_balance_.observe(t-600+i*100,t-500+i*100,3.f,1.f,6.f,5.f,true,true);
   return t;
  };
+ // Production camera path groups six adjacent complete cycles into three
+ // paired observations before the actual protected output is selected.
+ {ExperimentRunner r;auto t=prepare_foot(r);r.long_foot_balance_.reset();
+  for(int i=0;i<6;++i) {
+   const uint32_t start=t-1800+i*300,end=start+300;
+   r.long_foot_balance_.observeCycle(start,end,3.f,1.f,6.f,5.f,true,true,true);
+  }
+  Event e;assert(r.tryTiltPriority(e,t));assert(e.output_executed && e.pulse_width_ms==65);
+  assert(r.long_foot_balance_.offset()==5 && r.foot_trial_pending_effective_);}
  {ExperimentRunner r;auto t=prepare_foot(r);Event e;
   assert(r.tryTiltPriority(e,t));assert(e.output_executed && e.pulse_width_ms==65);
   assert(e.foot_span_baseline_ms==60 && e.foot_span_requested_ms==65);

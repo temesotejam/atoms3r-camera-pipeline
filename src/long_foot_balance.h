@@ -8,6 +8,7 @@ namespace long_foot_balance {
 class Controller {
  public:
   static constexpr unsigned kWindow=5;
+  static constexpr unsigned kPairWindow=3;
   static constexpr uint32_t kMaxAgeMs=12000;
   static constexpr uint32_t kProposalAgeMs=1500;
   static constexpr int kStepMs=5;
@@ -30,7 +31,7 @@ class Controller {
   float error()const{return error_;}
   // 'valid' is an image-quality decision; a missing image is not zero swing.
   // 'healthy' is independent actuator/IMU/run safety, not an image miss.
-  void observe(uint32_t start,uint32_t now,float left,float right,float plus_peak,float minus_peak,bool valid,bool healthy,bool trial_effective=true) {
+  void observe(uint32_t start,uint32_t now,float left,float right,float plus_peak,float minus_peak,bool valid,bool healthy,bool trial_effective=true,unsigned window=kWindow,float sequence_excess=NAN) {
     if(!healthy) {clearForSafety();return;}
     if(!now || start>=now || (changed_at_ && now<=changed_at_) ||
        !std::isfinite(plus_peak) || !std::isfinite(minus_peak) || plus_peak<=0 || minus_peak<=0)return;
@@ -50,20 +51,21 @@ class Controller {
     // Keep the reference moving while an unsent proposal waits behind a
     // guard. Freeze only at send time, never reuse an old startup window.
     if(state_!=State::Trial && state_!=State::Restore) {
-      referenceSample(start,now,left,right,plus_peak,minus_peak);
+      referenceSample(start,now,left,right,plus_peak,minus_peak,window,sequence_excess);
       return;
     }
     if(pending_)return;
     if(n_ && (now<window_start_ || now-window_start_>kMaxAgeMs))clearSamples();
     if(!n_)window_start_=start;
     left_sum_+=left;right_sum_+=right;plus_sum_+=plus_peak;minus_sum_+=minus_peak;
+    if(std::isfinite(sequence_excess)) {sequence_sum_+=sequence_excess;++sequence_count_;}
     ++n_;
-    if(n_<kWindow || state_==State::Restore)return;
+    if(n_<window || state_==State::Restore)return;
     const float inv=1.f/static_cast<float>(n_);
     const float l=left_sum_*inv,r=right_sum_*inv,p=plus_sum_*inv,m=minus_sum_*inv;
     // Sum spans before dividing so tiny noisy cycles do not have equal
     // influence to strong, well-observed foot motion.
-    const float e=(left_sum_-right_sum_)/(left_sum_+right_sum_+.1f*kWindow);error_=e;
+    const float e=(left_sum_-right_sum_)/(left_sum_+right_sum_+.1f*window);error_=e;
     if(l+r<.3f) {clearSamples();return;}
     if(state_==State::Trial) {
       const float weak=right_weak_ ? r:l;
@@ -73,16 +75,63 @@ class Controller {
       const float scale=(p+m)/(ref_plus_+ref_minus_);
       const float normalized_weak=weak/scale;
       const bool better=std::fabs(e)+.02f<std::fabs(ref_error_) && normalized_weak>=ref_weak_+.05f &&
-        normalized_weak>=ref_weak_*1.05f && p>=ref_plus_*.85f && m>=ref_minus_*.85f;
+        normalized_weak>=ref_weak_*1.05f && p>=ref_plus_*.85f && m>=ref_minus_*.85f &&
+        (!std::isfinite(ref_sequence_) || (sequence_count_==window && sequence_sum_/window<=ref_sequence_+.1f));
       if(!better) {requested_=previous_;state_=State::Restore;pending_=true;polarity_=-polarity_;clearSamples();return;}
       state_=State::Hold;clearSamples();clearReference();return;
     }
     clearSamples();
   }
+  // Pair adjacent complete cycles, never pairing across a missing period or
+  // an input change. Each member must be an effective, accepted trial when
+  // an intervention is active. The per-cycle safety guard runs even for an
+  // unusable camera period, before any pairing or statistical averaging.
+  void observeCycle(uint32_t start,uint32_t end,float left,float right,float plus,float minus,bool valid,bool healthy,bool effective=true) {
+    observe(start,end,NAN,NAN,plus,minus,false,healthy,false,kPairWindow);
+    if(!healthy || !start || end<=start) {pair_pending_=false;return;}
+    if(pair_last_end_ && start!=pair_last_end_) {
+      // An unknown cycle boundary loses the alternating phase. Never compare
+      // the old phase window with newly anchored pairs. A trial with an
+      // unresolvable phase returns to the last accepted setting.
+      clearSamples();clearReference();pair_pending_=false;pair_next_second_=false;
+      if(state_==State::Trial) {requested_=previous_;pending_=true;state_=State::Restore;}
+      else if(pending_ && state_!=State::Restore) {requested_=offset_;pending_=false;}
+    }
+    pair_last_end_=end;
+    const bool first=!pair_next_second_;
+    pair_next_second_=!pair_next_second_;
+    if(!valid ||
+       !std::isfinite(left) || !std::isfinite(right) || left<0 || right<0 ||
+       !std::isfinite(plus) || !std::isfinite(minus) || plus<=0 || minus<=0 ||
+       (changed_at_ && start<=changed_at_) || (trialActive() && !effective)) {
+      pair_pending_=false;return;
+    }
+    if(first) {
+      pair_start_=start;pair_end_=end;pair_left_=left;pair_right_=right;
+      pair_plus_=plus;pair_minus_=minus;pair_effective_=effective;
+      pair_generation_=trial_generation_;pair_pending_=true;return;
+    }
+    if(!pair_pending_ || pair_end_!=start || pair_generation_!=trial_generation_) {
+      pair_pending_=false;return;
+    }
+    const uint32_t pair_start=pair_start_;
+    const float l=(pair_left_+left)*.5f,r=(pair_right_+right)*.5f;
+    const float p=(pair_plus_+plus)*.5f,m=(pair_minus_+minus)*.5f;
+    const bool pair_effective=pair_effective_ && effective;
+    pair_pending_=false;
+    // This is a camera-relative sequence metric, not ground-forward travel.
+    // It becomes nonzero when a weak right period precedes a large left one.
+    const float sequence=pair_right_<pair_left_*.65f ? std::fmax(0.f,left-pair_right_) : 0.f;
+    observe(pair_start,end,l,r,p,m,true,healthy,pair_effective,kPairWindow,sequence);
+  }
   // The returned value is a pre-guard candidate. Always compare against the
   // ordinary baseline passed through an independent copy of the same guard.
   uint16_t propose(uint32_t now,uint16_t baseline,uint16_t cap,bool healthy) {
-    if(!healthy || !last_sample_ || now<last_sample_ || now-last_sample_>kMaxAgeMs) {
+    if(!healthy) {clearForSafety();return baseline;}
+    // A single healthy first cycle is not yet a pair. Do not discard it
+    // merely because an ordinary output arrives before its partner.
+    if(!last_sample_)return baseline;
+    if(now<last_sample_ || now-last_sample_>kMaxAgeMs) {
       clearForSafety();return baseline;
     }
     if(state_==State::Trial && changed_at_ &&
@@ -118,7 +167,7 @@ class Controller {
       if((requested_>offset_ && actual<current_guarded) ||
          (requested_<offset_ && actual>current_guarded))return;
       const bool reinstate=previous_active_ && requested_==previous_ && requested_!=0;
-      offset_=requested_;pending_=false;changed_at_=now;++trial_generation_;
+      offset_=requested_;pending_=false;changed_at_=now;++trial_generation_;pair_pending_=false;
       if(reinstate){active_reference_=previous_active_reference_;state_=State::Hold;
         safety_plus_=previous_safety_plus_;safety_minus_=previous_safety_minus_;}
       else {active_reference_=offset_;state_=State::Collect;}
@@ -133,56 +182,61 @@ class Controller {
     previous_active_=trialActive();previous_active_reference_=active_reference_;
     previous_safety_plus_=safety_plus_;previous_safety_minus_=safety_minus_;
     active_reference_=previous_;safety_plus_=ref_plus_;safety_minus_=ref_minus_;
-    offset_=requested_;pending_=false;state_=State::Trial;changed_at_=now;++trial_generation_;clearSamples();clearReference();
+    offset_=requested_;pending_=false;state_=State::Trial;changed_at_=now;++trial_generation_;pair_pending_=false;clearSamples();clearReference();
   }
  private:
-  struct Observation { uint32_t start=0,end=0;float left=0,right=0,plus=0,minus=0; };
+  struct Observation { uint32_t start=0,end=0;float left=0,right=0,plus=0,minus=0,sequence=NAN; };
   void clearReference(){reference_count_=reference_next_=0;}
-  void referenceSample(uint32_t start,uint32_t now,float l,float r,float p,float m) {
+  void referenceSample(uint32_t start,uint32_t now,float l,float r,float p,float m,unsigned window,float sequence) {
     Observation& item=reference_[reference_next_];
-    item.start=start;item.end=now;item.left=l;item.right=r;item.plus=p;item.minus=m;
-    reference_next_=(reference_next_+1)%kWindow;
-    if(reference_count_<kWindow)++reference_count_;
+    item.start=start;item.end=now;item.left=l;item.right=r;item.plus=p;item.minus=m;item.sequence=sequence;
+    reference_next_=(reference_next_+1)%window;
+    if(reference_count_<window)++reference_count_;
     n_=reference_count_;
-    if(reference_count_<kWindow)return;
+    if(reference_count_<window)return;
     const Observation& oldest=reference_[reference_next_];
     if(now<oldest.start || now-oldest.start>kMaxAgeMs) {
       // Keep only the latest point, so invalid/missing periods are not zero.
       Observation latest=item;clearReference();reference_[0]=latest;
       reference_count_=1;reference_next_=1;n_=1;pending_=false;return;
     }
-    float sl=0,sr=0,sp=0,sm=0,minp=p,maxp=p,minm=m,maxm=m;
-    for(unsigned i=0;i<kWindow;++i){const Observation& x=reference_[i];
+    float sl=0,sr=0,sp=0,sm=0,ss=0,minp=p,maxp=p,minm=m,maxm=m;unsigned ns=0;
+    for(unsigned i=0;i<window;++i){const Observation& x=reference_[i];
       sl+=x.left;sr+=x.right;sp+=x.plus;sm+=x.minus;
+      if(std::isfinite(x.sequence)){ss+=x.sequence;++ns;}
       if(x.plus<minp)minp=x.plus;
       if(x.plus>maxp)maxp=x.plus;
       if(x.minus<minm)minm=x.minus;
       if(x.minus>maxm)maxm=x.minus;
     }
-    const float avgp=sp/kWindow,avgm=sm/kWindow;
+    const float avgp=sp/window,avgm=sm/window;
     // Avoid a startup-growth window, without demanding identical RPM.
     if(maxp-minp>avgp*.35f || maxm-minm>avgm*.35f) {pending_=false;return;}
-    const float e=(sl-sr)/(sl+sr+.1f*kWindow);error_=e;
-    if((sl+sr)/kWindow<.3f || std::fabs(e)<=.10f) {pending_=false;state_=State::Hold;return;}
+    const float e=(sl-sr)/(sl+sr+.1f*window);error_=e;
+    if((sl+sr)/window<.3f || std::fabs(e)<=.10f) {pending_=false;state_=State::Hold;return;}
     const int sign=e>0.f?1:-1;
     if(decision_sign_ && sign!=decision_sign_)polarity_=-polarity_;
     decision_sign_=sign;
     const int next=offset_+polarity_*kStepMs;
     if(next< -kMaxOffsetMs || next>kMaxOffsetMs){pending_=false;return;}
-    ref_error_=e;right_weak_=sr<=sl;ref_weak_=(right_weak_?sr:sl)/kWindow;
-    ref_plus_=avgp;ref_minus_=avgm;previous_=offset_;requested_=next;
+    ref_error_=e;right_weak_=sr<=sl;ref_weak_=(right_weak_?sr:sl)/window;
+    ref_plus_=avgp;ref_minus_=avgm;ref_sequence_=ns==window?ss/window:NAN;previous_=offset_;requested_=next;
     pending_=true;proposal_at_=now;
   }
-  void clearSamples(){n_=0;window_start_=0;left_sum_=right_sum_=plus_sum_=minus_sum_=0;}
+  void clearSamples(){n_=0;window_start_=0;left_sum_=right_sum_=plus_sum_=minus_sum_=sequence_sum_=0;sequence_count_=0;}
   void clearForSafety(){*this=Controller{};}
   uint32_t last_sample_=0,changed_at_=0,proposal_at_=0,window_start_=0;unsigned n_=0;
   uint32_t trial_generation_=0;
   float left_sum_=0,right_sum_=0,plus_sum_=0,minus_sum_=0,error_=0;
   float ref_error_=0,ref_weak_=0,ref_plus_=0,ref_minus_=0;
   float safety_plus_=0,safety_minus_=0,previous_safety_plus_=0,previous_safety_minus_=0;
+  float sequence_sum_=0,ref_sequence_=NAN;unsigned sequence_count_=0;
   int offset_=0,requested_=0,previous_=0,active_reference_=0,polarity_=1,decision_sign_=0;
   int previous_active_reference_=0;
   bool pending_=false,right_weak_=false,previous_active_=false;
+  uint32_t pair_start_=0,pair_end_=0,pair_generation_=0,pair_last_end_=0;
+  float pair_left_=0,pair_right_=0,pair_plus_=0,pair_minus_=0;
+  bool pair_pending_=false,pair_effective_=false,pair_next_second_=false;
   State state_=State::Collect;
   Observation reference_[kWindow];unsigned reference_count_=0,reference_next_=0;
 };

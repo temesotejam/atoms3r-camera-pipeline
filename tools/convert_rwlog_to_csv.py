@@ -1181,7 +1181,7 @@ def write_energy_control_autonomous_events(metadata: dict, out_dir: Path) -> tup
             writer.writeheader()
             for event in zeros:
                 if isinstance(event, dict):
-                    if metadata.get("firmware_revision") == "1.0.91-two-cycle-recovery" and event.get("physical_next_peak_side") == -1:
+                    if metadata.get("firmware_revision") in ("1.0.91-two-cycle-recovery", "1.0.92-paired-foot-sequence") and event.get("physical_next_peak_side") == -1:
                         event = dict(event)
                         event["negative_recovery_baseline_ms"] = event.pop("long_foot_counterfactual_ms", None)
                         event["negative_recovery_candidate_ms"] = event.pop("long_foot_actual_ms", None)
