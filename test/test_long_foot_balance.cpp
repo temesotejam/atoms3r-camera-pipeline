@@ -48,6 +48,71 @@ int main(){
   assert(c.offset()==0);
   c.observe(40100,40200,3.f,1.f,7.f,7.f,true,false);
   assert(c.propose(40300,60,100,true)==60);
+  // Two accepted but completely guard-clipped candidates contain no
+  // response evidence. Do not increment a trial or disturb the setting;
+  // require a fresh full window before testing the opposite direction.
+  Controller blocked;
+  for(unsigned n=1000;n<=5000;n+=1000)sample(blocked,n,3.f,1.f);
+  assert(blocked.propose(5100,60,60,true)==60);
+  blocked.confirm(5100,60,60,false); // failed command does not count
+  blocked.confirm(5200,60,60,true);
+  assert(blocked.trialGeneration()==0 && blocked.offset()==0);
+  blocked.confirm(5300,60,60,true);
+  assert(blocked.trialGeneration()==0 && blocked.offset()==0);
+  for(unsigned n=6000;n<=9000;n+=1000)sample(blocked,n,3.f,1.f);
+  assert(blocked.propose(9100,60,60,true)==60);
+  sample(blocked,10000,3.f,1.f);
+  assert(blocked.propose(10100,60,60,true)==55);
+  blocked.confirm(10100,60,55,true);
+  assert(blocked.trialGeneration()==1 && blocked.offset()==-5);
+  Controller recovered;
+  for(unsigned n=1000;n<=5000;n+=1000)sample(recovered,n,3.f,1.f);
+  recovered.confirm(5100,60,60,true);recovered.confirm(5200,60,60,true);
+  for(unsigned n=6000;n<=10000;n+=1000)sample(recovered,n,2.f,2.f);
+  assert(recovered.propose(10100,60,100,true)==60 && recovered.trialGeneration()==0);
+  // Actual paired-cycle path: missing cycles cannot become zero motion or
+  // supply the six fresh cycles required for the opposite proposal.
+  Controller paired_blocked;
+  for(unsigned i=0;i<6;++i)
+    paired_blocked.observeCycle(100+i*100,200+i*100,3.f,1.f,7.f,7.f,true,true);
+  assert(paired_blocked.propose(710,60,60,true)==60);
+  paired_blocked.confirm(710,60,60,true);paired_blocked.confirm(720,60,60,true);
+  for(unsigned i=0;i<6;++i)
+    paired_blocked.observeCycle(800+i*100,900+i*100,3.f,1.f,7.f,7.f,i!=2,true);
+  assert(paired_blocked.propose(1410,60,60,true)==60);
+  for(unsigned i=0;i<6;++i)
+    paired_blocked.observeCycle(1400+i*100,1500+i*100,3.f,1.f,7.f,7.f,true,true);
+  assert(paired_blocked.propose(2010,60,60,true)==55);
+  // A first half observed before the second clipped command cannot be
+  // paired into the new reference, while alternating phase stays intact.
+  Controller half_blocked;
+  for(unsigned i=0;i<6;++i)
+    half_blocked.observeCycle(100+i*100,200+i*100,3.f,1.f,7.f,7.f,true,true);
+  assert(half_blocked.propose(710,60,60,true)==60);
+  half_blocked.confirm(710,60,60,true);
+  half_blocked.observeCycle(700,800,3.f,1.f,7.f,7.f,true,true);
+  half_blocked.confirm(810,60,60,true);
+  for(unsigned i=0;i<5;++i)
+    half_blocked.observeCycle(800+i*100,900+i*100,3.f,1.f,7.f,7.f,true,true);
+  assert(half_blocked.propose(1310,60,60,true)==60);
+  for(unsigned i=0;i<2;++i)
+    half_blocked.observeCycle(1300+i*100,1400+i*100,3.f,1.f,7.f,7.f,true,true);
+  assert(half_blocked.propose(1510,60,60,true)==55);
+  // A complete historical pair can arrive after both clipped commands;
+  // its recorded start, not its arrival time, determines eligibility.
+  Controller delayed_block;
+  for(unsigned i=0;i<6;++i)
+    delayed_block.observeCycle(100+i*100,200+i*100,3.f,1.f,7.f,7.f,true,true);
+  assert(delayed_block.propose(710,60,60,true)==60);
+  delayed_block.confirm(710,60,60,true);delayed_block.confirm(950,60,60,true);
+  delayed_block.observeCycle(700,800,3.f,1.f,7.f,7.f,true,true);
+  delayed_block.observeCycle(800,900,3.f,1.f,7.f,7.f,true,true);
+  for(unsigned i=0;i<4;++i)
+    delayed_block.observeCycle(1000+i*100,1100+i*100,3.f,1.f,7.f,7.f,true,true);
+  assert(delayed_block.propose(1410,60,60,true)==60);
+  for(unsigned i=0;i<2;++i)
+    delayed_block.observeCycle(1400+i*100,1500+i*100,3.f,1.f,7.f,7.f,true,true);
+  assert(delayed_block.propose(1610,60,60,true)==55);
   Controller safety;
   for(unsigned n=1000;n<=5000;n+=1000)sample(safety,n,3.f,1.f);
   safety.confirm(5300,60,65,true);

@@ -42,7 +42,7 @@ class Controller {
       if(offset_==0) {clearForSafety();return;}
       requested_=0;state_=State::Restore;pending_=true;clearSamples();return;
     }
-    if(changed_at_ && start<=changed_at_)return;
+    if((changed_at_ && start<=changed_at_) || (fresh_after_ && start<=fresh_after_))return;
     if(!valid || !std::isfinite(left) || !std::isfinite(right) || left<0 || right<0)return;
     if(trialActive() && !trial_effective)return;
     if(last_sample_ && now<=last_sample_)return;
@@ -103,7 +103,8 @@ class Controller {
     if(!valid ||
        !std::isfinite(left) || !std::isfinite(right) || left<0 || right<0 ||
        !std::isfinite(plus) || !std::isfinite(minus) || plus<=0 || minus<=0 ||
-       (changed_at_ && start<=changed_at_) || (trialActive() && !effective)) {
+       (changed_at_ && start<=changed_at_) || (fresh_after_ && start<=fresh_after_) ||
+       (trialActive() && !effective)) {
       pair_pending_=false;return;
     }
     if(first) {
@@ -176,7 +177,22 @@ class Controller {
     }
     // A candidate clipped to the same guarded command is no experiment.
     if((requested_>offset_ && actual<=current_guarded) ||
-       (requested_<offset_ && actual>=current_guarded))return;
+       (requested_<offset_ && actual>=current_guarded)) {
+      // A candidate swallowed by an output cap contains no evidence about
+      // physical response. If two accepted commands in the same direction
+      // were blocked, reacquire a full fresh window before trying the other
+      // direction. Preserve the last accepted setting and generation.
+      if(actual==current_guarded && ++blocked_>=2) {
+        blocked_=0;polarity_=-polarity_;pending_=false;requested_=offset_;fresh_after_=now;
+        state_=trialActive()?State::Hold:State::Collect;
+        clearSamples();clearReference();
+        // Preserve alternating phase but discard any first half collected
+        // before the blocked decision; it must not seed the fresh window.
+        pair_pending_=false;
+      }
+      return;
+    }
+    blocked_=0;
     const int actual_change=static_cast<int>(actual)-static_cast<int>(current_guarded);
     if(actual_change>kStepMs || actual_change< -kStepMs)return;
     previous_active_=trialActive();previous_active_reference_=active_reference_;
@@ -213,19 +229,20 @@ class Controller {
     // Avoid a startup-growth window, without demanding identical RPM.
     if(maxp-minp>avgp*.35f || maxm-minm>avgm*.35f) {pending_=false;return;}
     const float e=(sl-sr)/(sl+sr+.1f*window);error_=e;
-    if((sl+sr)/window<.3f || std::fabs(e)<=.10f) {pending_=false;state_=State::Hold;return;}
+    if((sl+sr)/window<.3f || std::fabs(e)<=.10f) {pending_=false;blocked_=0;state_=State::Hold;return;}
     const int sign=e>0.f?1:-1;
     if(decision_sign_ && sign!=decision_sign_)polarity_=-polarity_;
     decision_sign_=sign;
     const int next=offset_+polarity_*kStepMs;
-    if(next< -kMaxOffsetMs || next>kMaxOffsetMs){pending_=false;return;}
+    if(next< -kMaxOffsetMs || next>kMaxOffsetMs){pending_=false;blocked_=0;return;}
+    if(!pending_ || next!=requested_)blocked_=0;
     ref_error_=e;right_weak_=sr<=sl;ref_weak_=(right_weak_?sr:sl)/window;
     ref_plus_=avgp;ref_minus_=avgm;ref_sequence_=ns==window?ss/window:NAN;previous_=offset_;requested_=next;
     pending_=true;proposal_at_=now;
   }
   void clearSamples(){n_=0;window_start_=0;left_sum_=right_sum_=plus_sum_=minus_sum_=sequence_sum_=0;sequence_count_=0;}
   void clearForSafety(){*this=Controller{};}
-  uint32_t last_sample_=0,changed_at_=0,proposal_at_=0,window_start_=0;unsigned n_=0;
+  uint32_t last_sample_=0,changed_at_=0,proposal_at_=0,window_start_=0,fresh_after_=0;unsigned n_=0;
   uint32_t trial_generation_=0;
   float left_sum_=0,right_sum_=0,plus_sum_=0,minus_sum_=0,error_=0;
   float ref_error_=0,ref_weak_=0,ref_plus_=0,ref_minus_=0;
@@ -234,6 +251,7 @@ class Controller {
   int offset_=0,requested_=0,previous_=0,active_reference_=0,polarity_=1,decision_sign_=0;
   int previous_active_reference_=0;
   bool pending_=false,right_weak_=false,previous_active_=false;
+  unsigned blocked_=0;
   uint32_t pair_start_=0,pair_end_=0,pair_generation_=0,pair_last_end_=0;
   float pair_left_=0,pair_right_=0,pair_plus_=0,pair_minus_=0;
   bool pair_pending_=false,pair_effective_=false,pair_next_second_=false;

@@ -23,7 +23,7 @@ def convert(version):
             return list(csv.DictReader(stream))
 
 
-for version in ('1.0.91-two-cycle-recovery', '1.0.92-paired-foot-sequence'):
+for version in ('1.0.91-two-cycle-recovery', '1.0.92-paired-foot-sequence', '1.0.93-blocked-candidate-retry'):
     negative, positive = convert(version)
     assert negative['negative_recovery_baseline_ms'] == '28'
     assert negative['negative_recovery_candidate_ms'] == '33'
@@ -37,4 +37,4 @@ negative, positive = convert('1.0.90-long-foot-window')
 assert negative['long_foot_actual_ms'] == '33'
 assert negative['negative_recovery_candidate_ms'] == ''
 assert positive['long_foot_actual_ms'] == '33'
-print('Foot log side mapping for 1.0.90, 1.0.91 and 1.0.92 PASS')
+print('Foot log side mapping for 1.0.90 through 1.0.93 PASS')

@@ -1,6 +1,6 @@
 {
   "name": "AtomS3R Lateral Energy Control",
-  "version": "1.0.92-paired-foot-sequence",
+  "version": "1.0.93-blocked-candidate-retry",
   "new_install_improv_wait_time": 0,
   "builds": [
     {

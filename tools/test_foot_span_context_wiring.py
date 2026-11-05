@@ -35,5 +35,5 @@ assert 'trial_in.negative_cap_extra_ms=5' in runner and 'auto candidate_guard=wh
 assert 'delta>0 && delta<=5' in runner and 'negative_cap_recovery_.command(' in runner
 assert 'foot_span_control_.cycle(' not in cycle and 'foot_span_control_.confirm(' not in decision
 metadata=(root/'src/psram_logger.cpp').read_text(encoding='utf8')
-assert 'three_adjacent_pairs_sequence_v3' in metadata
+assert 'three_adjacent_pairs_blocked_retry_v4' in metadata
 print('1200mA camera feedback, comparable context and log wiring PASS')
