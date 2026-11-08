@@ -4,6 +4,16 @@ using long_foot_balance::Controller;
 static void sample(Controller& c,unsigned n,float l,float r,float p=7.f,float m=7.f) {
   c.observe(n-100,n,l,r,p,m,true,true);
 }
+static void beginPairs(Controller& c) {
+  for(unsigned i=0;i<6;++i)c.observeCycle(1000+i*700,1700+i*700,3,1,6,5,true,true,true);
+  c.confirm(5300,60,65,true);
+  c.observeCycle(5200,5900,3,1,6,5,true,true,true);
+  c.observeCycle(5900,6600,3,1,6,5,true,true,true);
+}
+static void trialPair(Controller& c,unsigned start,float l,float r,float p=6,float m=5,bool valid=true,bool effective=true) {
+  c.observeCycle(start,start+700,l,r,p,m,valid,true,effective);
+  c.observeCycle(start+700,start+1400,l,r,p,m,valid,true,effective);
+}
 int main(){
   Controller c;
   for(unsigned n=1000;n<=4000;n+=1000)sample(c,n,3.f,1.f);
@@ -228,4 +238,36 @@ int main(){
   // with the pre-change sequence window; restore the prior pulse setting.
   phase_gap.observeCycle(7000,7700,3,.5f,6,5,true,true,true);
   assert(phase_gap.state()==Controller::State::Restore);
+  // Early loss needs two consecutive complete effective pairs; restore the
+  // last setting rather than claiming that the tested direction is causal.
+  Controller loss;beginPairs(loss);
+  trialPair(loss,6600,4,.4f);assert(loss.state()==Controller::State::Trial);
+  trialPair(loss,8000,4,.4f);assert(loss.state()==Controller::State::Restore);
+  assert(loss.propose(9401,60,100,true)==60);
+  loss.confirm(9450,65,60,false);assert(loss.offset()==5);
+  loss.confirm(9500,65,60,true);assert(loss.offset()==0);
+  // Reacquire observations after the confirmed restore before testing the
+  // other direction; do not keep reapplying the rejected +5 candidate.
+  trialPair(loss,9400,3,1);
+  trialPair(loss,10800,3,1);trialPair(loss,12200,3,1);trialPair(loss,13600,3,1);
+  assert(loss.propose(15001,60,100,true)==55);
+  // Missing or non-effective pairs break the consecutive evidence.
+  for(int kind=0;kind<2;++kind) {
+    Controller gap;beginPairs(gap);trialPair(gap,6600,4,.4f);
+    trialPair(gap,8000,4,.4f,6,5,kind!=0,kind!=1);
+    trialPair(gap,9400,4,.4f);assert(gap.state()==Controller::State::Trial);
+    trialPair(gap,10800,4,.4f);assert(gap.state()==Controller::State::Restore);
+  }
+  // A single bad pair, balanced or improving weak side, or a simultaneous
+  // larger sway must not trigger the new early loss condition.
+  Controller early_recovered;beginPairs(early_recovered);trialPair(early_recovered,6600,4,.4f);
+  trialPair(early_recovered,8000,3,1.5f);assert(early_recovered.state()==Controller::State::Trial);
+  Controller growth_pair;beginPairs(growth_pair);trialPair(growth_pair,6600,4,.4f,7.2f,6.f);
+  trialPair(growth_pair,8000,4,.4f,7.2f,6.f);assert(growth_pair.state()==Controller::State::Trial);
+  Controller preserved;beginPairs(preserved);trialPair(preserved,6600,3.3f,1.1f,6.6f,5.5f);
+  trialPair(preserved,8000,3.3f,1.1f,6.6f,5.5f);assert(preserved.state()==Controller::State::Trial);
+  // Movement becoming small in both feet does not count as a stronger
+  // imbalance, even if the weak foot decreases substantially.
+  Controller both_small;beginPairs(both_small);trialPair(both_small,6600,1.2f,.4f);
+  trialPair(both_small,8000,1.2f,.4f);assert(both_small.state()==Controller::State::Trial);
 }

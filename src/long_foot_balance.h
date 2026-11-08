@@ -88,12 +88,12 @@ class Controller {
   // unusable camera period, before any pairing or statistical averaging.
   void observeCycle(uint32_t start,uint32_t end,float left,float right,float plus,float minus,bool valid,bool healthy,bool effective=true) {
     observe(start,end,NAN,NAN,plus,minus,false,healthy,false,kPairWindow);
-    if(!healthy || !start || end<=start) {pair_pending_=false;return;}
+    if(!healthy || !start || end<=start) {pair_pending_=false;early_bad_count_=0;return;}
     if(pair_last_end_ && start!=pair_last_end_) {
       // An unknown cycle boundary loses the alternating phase. Never compare
       // the old phase window with newly anchored pairs. A trial with an
       // unresolvable phase returns to the last accepted setting.
-      clearSamples();clearReference();pair_pending_=false;pair_next_second_=false;
+      clearSamples();clearReference();pair_pending_=false;pair_next_second_=false;early_bad_count_=0;
       if(state_==State::Trial) {requested_=previous_;pending_=true;state_=State::Restore;}
       else if(pending_ && state_!=State::Restore) {requested_=offset_;pending_=false;}
     }
@@ -105,7 +105,7 @@ class Controller {
        !std::isfinite(plus) || !std::isfinite(minus) || plus<=0 || minus<=0 ||
        (changed_at_ && start<=changed_at_) || (fresh_after_ && start<=fresh_after_) ||
        (trialActive() && !effective)) {
-      pair_pending_=false;return;
+      pair_pending_=false;early_bad_count_=0;return;
     }
     if(first) {
       pair_start_=start;pair_end_=end;pair_left_=left;pair_right_=right;
@@ -113,13 +113,38 @@ class Controller {
       pair_generation_=trial_generation_;pair_pending_=true;return;
     }
     if(!pair_pending_ || pair_end_!=start || pair_generation_!=trial_generation_) {
-      pair_pending_=false;return;
+      pair_pending_=false;early_bad_count_=0;return;
     }
     const uint32_t pair_start=pair_start_;
     const float l=(pair_left_+left)*.5f,r=(pair_right_+right)*.5f;
     const float p=(pair_plus_+plus)*.5f,m=(pair_minus_+minus)*.5f;
     const bool pair_effective=pair_effective_ && effective;
     pair_pending_=false;
+    // Experimental loss limiter: demand two adjacent, individually bad
+    // effective pairs. Thresholds are provisional, not identified plant
+    // dynamics, and camera-relative motion is not ground stride. Reject
+    // comparisons during appreciable body-amplitude changes.
+    if(state_==State::Trial && !pending_ && pair_effective &&
+       ref_plus_>0.f && ref_minus_>0.f) {
+      const bool comparable=p>=ref_plus_*.85f && p<=ref_plus_*1.15f &&
+          m>=ref_minus_*.85f && m<=ref_minus_*1.15f;
+      const float scale=(p+m)/(ref_plus_+ref_minus_);
+      const float weak=(right_weak_?r:l)/scale;
+      const float e=(l-r)/(l+r+.1f);
+      const bool same_side=(right_weak_ ? e>0.f : e<0.f);
+      const bool bad=comparable && same_side && weak<ref_weak_*.70f &&
+          weak<ref_weak_-.15f && std::fabs(e)>std::fabs(ref_error_)+.15f;
+      if(bad && (!early_bad_end_ || pair_start==early_bad_end_)) ++early_bad_count_;
+      else early_bad_count_=bad?1u:0u;
+      early_bad_end_=end;
+      if(early_bad_count_>=2) {
+        requested_=previous_;state_=State::Restore;pending_=true;
+        // Only reverse search after the restore command is accepted; this
+        // guard does not prove the physical response polarity.
+        reverse_after_restore_=true;
+        early_bad_count_=0;early_bad_end_=0;clearSamples();return;
+      }
+    } else {early_bad_count_=0;early_bad_end_=0;}
     // This is a camera-relative sequence metric, not ground-forward travel.
     // It becomes nonzero when a weak right period precedes a large left one.
     const float sequence=pair_right_<pair_left_*.65f ? std::fmax(0.f,left-pair_right_) : 0.f;
@@ -168,6 +193,7 @@ class Controller {
       if((requested_>offset_ && actual<current_guarded) ||
          (requested_<offset_ && actual>current_guarded))return;
       const bool reinstate=previous_active_ && requested_==previous_ && requested_!=0;
+      if(reverse_after_restore_){polarity_=-polarity_;reverse_after_restore_=false;}
       offset_=requested_;pending_=false;changed_at_=now;++trial_generation_;pair_pending_=false;
       if(reinstate){active_reference_=previous_active_reference_;state_=State::Hold;
         safety_plus_=previous_safety_plus_;safety_minus_=previous_safety_minus_;}
@@ -240,7 +266,7 @@ class Controller {
     ref_plus_=avgp;ref_minus_=avgm;ref_sequence_=ns==window?ss/window:NAN;previous_=offset_;requested_=next;
     pending_=true;proposal_at_=now;
   }
-  void clearSamples(){n_=0;window_start_=0;left_sum_=right_sum_=plus_sum_=minus_sum_=sequence_sum_=0;sequence_count_=0;}
+  void clearSamples(){n_=0;window_start_=0;left_sum_=right_sum_=plus_sum_=minus_sum_=sequence_sum_=0;sequence_count_=0;early_bad_count_=0;early_bad_end_=0;}
   void clearForSafety(){*this=Controller{};}
   uint32_t last_sample_=0,changed_at_=0,proposal_at_=0,window_start_=0,fresh_after_=0;unsigned n_=0;
   uint32_t trial_generation_=0;
@@ -250,8 +276,9 @@ class Controller {
   float sequence_sum_=0,ref_sequence_=NAN;unsigned sequence_count_=0;
   int offset_=0,requested_=0,previous_=0,active_reference_=0,polarity_=1,decision_sign_=0;
   int previous_active_reference_=0;
-  bool pending_=false,right_weak_=false,previous_active_=false;
+  bool pending_=false,right_weak_=false,previous_active_=false,reverse_after_restore_=false;
   unsigned blocked_=0;
+  unsigned early_bad_count_=0;uint32_t early_bad_end_=0;
   uint32_t pair_start_=0,pair_end_=0,pair_generation_=0,pair_last_end_=0;
   float pair_left_=0,pair_right_=0,pair_plus_=0,pair_minus_=0;
   bool pair_pending_=false,pair_effective_=false,pair_next_second_=false;
