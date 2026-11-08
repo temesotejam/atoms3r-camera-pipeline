@@ -248,7 +248,8 @@
       <p>公開ビルド：<code id="build-sha">取得中</code><br><a href="build-sha.txt">ビルドSHA</a> / <a href="firmware/SHA256SUMS.txt">ファームウェアSHA-256</a></p>
     </section>
     <footer>atoms3r-lateral-energy-control</footer>
-  </main>
+  <section class="panel"><h2>足カメラの診断</h2><p>カメラの撮影と認識の速度を比較する受動観測用のファームウェアです。</p><p><a href="camera/">足カメラ診断版の書込みページを開く</a></p></section>
+</main>
   <script>
     fetch('build-sha.txt', {cache: 'no-store'})
       .then(r => { if (!r.ok) throw new Error('build identity unavailable'); return r.text(); })
