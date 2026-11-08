@@ -89,6 +89,21 @@ class Controller {
   void observeCycle(uint32_t start,uint32_t end,float left,float right,float plus,float minus,bool valid,bool healthy,bool effective=true) {
     observe(start,end,NAN,NAN,plus,minus,false,healthy,false,kPairWindow);
     if(!healthy || !start || end<=start) {pair_pending_=false;early_bad_count_=0;return;}
+    // A foot trial cannot be evaluated without fresh camera observations.
+    // Two consecutive wholly post-command invalid cycles make the trial
+    // inconclusive: restore its prior setting without reversing polarity.
+    // An invalid observation is never treated as a zero-length step.
+    if(state_==State::Trial && !pending_ && changed_at_ && start>changed_at_) {
+      if(!valid) {
+        missing_cycles_=(missing_end_==start ? missing_cycles_+1 : 1);
+        missing_end_=end;
+        if(missing_cycles_>=2) {
+          requested_=previous_;pending_=true;state_=State::Restore;
+          missing_cycles_=0;missing_end_=0;pair_pending_=false;
+          clearSamples();return;
+        }
+      } else {missing_cycles_=0;missing_end_=0;}
+    } else {missing_cycles_=0;missing_end_=0;}
     if(pair_last_end_ && start!=pair_last_end_) {
       // An unknown cycle boundary loses the alternating phase. Never compare
       // the old phase window with newly anchored pairs. A trial with an
@@ -279,6 +294,7 @@ class Controller {
   bool pending_=false,right_weak_=false,previous_active_=false,reverse_after_restore_=false;
   unsigned blocked_=0;
   unsigned early_bad_count_=0;uint32_t early_bad_end_=0;
+  unsigned missing_cycles_=0;uint32_t missing_end_=0;
   uint32_t pair_start_=0,pair_end_=0,pair_generation_=0,pair_last_end_=0;
   float pair_left_=0,pair_right_=0,pair_plus_=0,pair_minus_=0;
   bool pair_pending_=false,pair_effective_=false,pair_next_second_=false;

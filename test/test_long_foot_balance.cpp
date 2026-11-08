@@ -15,6 +15,18 @@ static void trialPair(Controller& c,unsigned start,float l,float r,float p=6,flo
   c.observeCycle(start+700,start+1400,l,r,p,m,valid,true,effective);
 }
 int main(){
+  Controller missing;beginPairs(missing);
+  assert(missing.state()==Controller::State::Trial);
+  missing.observeCycle(6600,7300,3,1,6,5,false,true,true);
+  assert(missing.state()==Controller::State::Trial);
+  missing.observeCycle(7300,8000,3,1,6,5,true,true,true);
+  missing.observeCycle(8000,8700,3,1,6,5,false,true,true);
+  assert(missing.state()==Controller::State::Trial);
+  missing.observeCycle(8700,9400,3,1,6,5,false,true,true);
+  assert(missing.state()==Controller::State::Restore);
+  assert(missing.propose(9410,60,100,true)==60);
+  missing.confirm(9410,65,60,true);
+  assert(missing.offset()==0 && missing.state()==Controller::State::Collect);
   Controller c;
   for(unsigned n=1000;n<=4000;n+=1000)sample(c,n,3.f,1.f);
   assert(c.propose(4100,60,100,true)==60); // first four periods untouched
@@ -251,10 +263,12 @@ int main(){
   trialPair(loss,9400,3,1);
   trialPair(loss,10800,3,1);trialPair(loss,12200,3,1);trialPair(loss,13600,3,1);
   assert(loss.propose(15001,60,100,true)==55);
-  // Missing or non-effective pairs break the consecutive evidence.
+  // A missing pair now restores an inconclusive trial. A non-effective pair
+  // still breaks early-loss evidence without claiming a direction.
   for(int kind=0;kind<2;++kind) {
     Controller gap;beginPairs(gap);trialPair(gap,6600,4,.4f);
     trialPair(gap,8000,4,.4f,6,5,kind!=0,kind!=1);
+    if(kind==0) {assert(gap.state()==Controller::State::Restore);continue;}
     trialPair(gap,9400,4,.4f);assert(gap.state()==Controller::State::Trial);
     trialPair(gap,10800,4,.4f);assert(gap.state()==Controller::State::Restore);
   }

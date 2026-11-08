@@ -1,6 +1,6 @@
 {
   "name": "AtomS3R Lateral Energy Control",
-  "version": "1.0.97-paired-sway-rollback",
+  "version": "1.0.98-foot-observation-timeout",
   "new_install_improv_wait_time": 0,
   "builds": [
     {
