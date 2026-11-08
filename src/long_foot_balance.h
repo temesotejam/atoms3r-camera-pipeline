@@ -91,14 +91,16 @@ class Controller {
     if(!healthy || !start || end<=start) {pair_pending_=false;early_bad_count_=0;return;}
     // A foot trial cannot be evaluated without fresh camera observations.
     // Two consecutive wholly post-command invalid cycles make the trial
-    // inconclusive: restore its prior setting without reversing polarity.
+    // inconclusive: restore its prior setting. After the restore is accepted,
+    // the next fresh experiment explores the other direction; this is not a
+    // claim that either direction improved or harmed walking.
     // An invalid observation is never treated as a zero-length step.
     if(state_==State::Trial && !pending_ && changed_at_ && start>changed_at_) {
       if(!valid) {
         missing_cycles_=(missing_end_==start ? missing_cycles_+1 : 1);
         missing_end_=end;
         if(missing_cycles_>=2) {
-          requested_=previous_;pending_=true;state_=State::Restore;
+          requested_=previous_;pending_=true;state_=State::Restore;reverse_after_restore_=true;
           missing_cycles_=0;missing_end_=0;pair_pending_=false;
           clearSamples();return;
         }

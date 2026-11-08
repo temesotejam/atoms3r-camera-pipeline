@@ -6,7 +6,7 @@ from convert_rwlog_to_csv import expand_tables, write_energy_control_autonomous_
 fields=['foot_span_flags','physical_next_peak_side','long_foot_counterfactual_ms','long_foot_actual_ms','long_foot_effective']
 row=[1<<14,1,22,25,True]
 root={'firmware_revision':'1.0.95-positive-sway-probe','energy_control_autonomous_zero_cross_events':{'fields':fields,'rows':[row]}}
-for version in ('1.0.95-positive-sway-probe','1.0.96-tapered-amplitude-recovery', '1.0.97-paired-sway-rollback', '1.0.98-foot-observation-timeout'):
+for version in ('1.0.95-positive-sway-probe','1.0.96-tapered-amplitude-recovery', '1.0.97-paired-sway-rollback', '1.0.98-foot-observation-timeout', '1.0.99-alternate-foot-trial'):
     metadata=expand_tables(dict(root,firmware_revision=version))
     with tempfile.TemporaryDirectory() as d:
         write_energy_control_autonomous_events(metadata,Path(d))

@@ -57,7 +57,7 @@ def expand_tables(value, version=None):
         result = {key: expand_tables(item, version) for key, item in value.items()}
         if 'foot_span_flags' in result:
             mask = result['foot_span_flags']
-            bits = 15 if version in ('1.0.95-positive-sway-probe', '1.0.96-tapered-amplitude-recovery', '1.0.97-paired-sway-rollback', '1.0.98-foot-observation-timeout') else 14
+            bits = 15 if version in ('1.0.95-positive-sway-probe', '1.0.96-tapered-amplitude-recovery', '1.0.97-paired-sway-rollback', '1.0.98-foot-observation-timeout', '1.0.99-alternate-foot-trial') else 14
             if type(mask) is not int or mask < 0 or mask >= (1 << bits):
                 raise ValueError('Invalid foot span flag mask')
             names = ('valid','selected','startup','left_low','right_low','left_both',
@@ -1184,12 +1184,12 @@ def write_energy_control_autonomous_events(metadata: dict, out_dir: Path) -> tup
             writer.writeheader()
             for event in zeros:
                 if isinstance(event, dict):
-                    if metadata.get("firmware_revision") in ("1.0.95-positive-sway-probe", "1.0.96-tapered-amplitude-recovery", "1.0.97-paired-sway-rollback", "1.0.98-foot-observation-timeout") and int(event.get("foot_span_flags", 0)) & (1 << 14):
+                    if metadata.get("firmware_revision") in ("1.0.95-positive-sway-probe", "1.0.96-tapered-amplitude-recovery", "1.0.97-paired-sway-rollback", "1.0.98-foot-observation-timeout", "1.0.99-alternate-foot-trial") and int(event.get("foot_span_flags", 0)) & (1 << 14):
                         event = dict(event)
                         event["positive_sway_probe_baseline_ms"] = event.pop("long_foot_counterfactual_ms", None)
                         event["positive_sway_probe_candidate_ms"] = event.pop("long_foot_actual_ms", None)
                         event["positive_sway_probe_executed"] = event.pop("long_foot_effective", None)
-                    elif metadata.get("firmware_revision") in ("1.0.91-two-cycle-recovery", "1.0.92-paired-foot-sequence", "1.0.93-blocked-candidate-retry", "1.0.94-foot-trial-loss", "1.0.95-positive-sway-probe", "1.0.96-tapered-amplitude-recovery", "1.0.97-paired-sway-rollback", "1.0.98-foot-observation-timeout") and event.get("physical_next_peak_side") == -1:
+                    elif metadata.get("firmware_revision") in ("1.0.91-two-cycle-recovery", "1.0.92-paired-foot-sequence", "1.0.93-blocked-candidate-retry", "1.0.94-foot-trial-loss", "1.0.95-positive-sway-probe", "1.0.96-tapered-amplitude-recovery", "1.0.97-paired-sway-rollback", "1.0.98-foot-observation-timeout", "1.0.99-alternate-foot-trial") and event.get("physical_next_peak_side") == -1:
                         event = dict(event)
                         event["negative_recovery_baseline_ms"] = event.pop("long_foot_counterfactual_ms", None)
                         event["negative_recovery_candidate_ms"] = event.pop("long_foot_actual_ms", None)

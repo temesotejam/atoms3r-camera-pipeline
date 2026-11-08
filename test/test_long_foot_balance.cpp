@@ -25,8 +25,13 @@ int main(){
   missing.observeCycle(8700,9400,3,1,6,5,false,true,true);
   assert(missing.state()==Controller::State::Restore);
   assert(missing.propose(9410,60,100,true)==60);
+  missing.confirm(9410,65,60,false);
+  assert(missing.offset()==5 && missing.state()==Controller::State::Restore);
   missing.confirm(9410,65,60,true);
   assert(missing.offset()==0 && missing.state()==Controller::State::Collect);
+  for(unsigned i=0;i<8;++i)
+    missing.observeCycle(9400+i*700,10100+i*700,3,1,6,5,true,true,true);
+  assert(missing.propose(15010,60,100,true)==55);
   Controller c;
   for(unsigned n=1000;n<=4000;n+=1000)sample(c,n,3.f,1.f);
   assert(c.propose(4100,60,100,true)==60); // first four periods untouched
