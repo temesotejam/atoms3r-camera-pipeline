@@ -1,6 +1,6 @@
 {
   "name": "AtomS3R Lateral Energy Control",
-  "version": "1.0.95-positive-sway-probe",
+  "version": "1.0.96-tapered-amplitude-recovery",
   "new_install_improv_wait_time": 0,
   "builds": [
     {

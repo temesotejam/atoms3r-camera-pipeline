@@ -23,7 +23,7 @@ def convert(version):
             return list(csv.DictReader(stream))
 
 
-for version in ('1.0.91-two-cycle-recovery', '1.0.92-paired-foot-sequence', '1.0.93-blocked-candidate-retry', '1.0.94-foot-trial-loss', '1.0.95-positive-sway-probe'):
+for version in ('1.0.91-two-cycle-recovery', '1.0.92-paired-foot-sequence', '1.0.93-blocked-candidate-retry', '1.0.94-foot-trial-loss', '1.0.95-positive-sway-probe', '1.0.96-tapered-amplitude-recovery'):
     negative, positive = convert(version)
     assert negative['negative_recovery_baseline_ms'] == '28'
     assert negative['negative_recovery_candidate_ms'] == '33'

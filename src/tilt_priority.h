@@ -21,9 +21,12 @@ struct Input {
   bool hardware_healthy=false;
 };
 struct Choice {
-  bool selected=false,coast=false;
+  bool selected=false,coast=false,speed_tapered=false;
   int16_t current_ma=0;
   uint16_t width_ms=0;
+  // Width before downstream wheel and foot intervention; used only to avoid
+  // learning from an input that was changed after the proposal.
+  uint16_t proposed_width_ms=0;
   int8_t direction=0;
   float target_deg=NAN;
 };
@@ -84,7 +87,7 @@ class Controller {
     if((side!=1 && side!=-1)||!ms)return;
     History& h=history_[index(side)];h.cross_ms=ms;h.confirmed=false;
   }
-  void confirm(int8_t side,uint32_t ms,const Choice& choice,bool executed,bool temporary_cap_trial=false) {
+  void confirm(int8_t side,uint32_t ms,const Choice& choice,bool executed,bool temporary_cap_trial=false,bool allow_taper_learning=true) {
     if((side!=1 && side!=-1)||!ms)return;
     History& h=history_[index(side)];
     h.confirmed=executed && choice.selected && choice.direction==side &&
@@ -94,6 +97,8 @@ class Controller {
     if(h.confirmed){
       h.command_ms=choice.width_ms;h.was_drive=!choice.coast;h.command_target=choice.target_deg;
       h.temporary_cap_trial=temporary_cap_trial;
+      h.taper_learning=allow_taper_learning && !temporary_cap_trial && !choice.coast && choice.speed_tapered &&
+          choice.proposed_width_ms && choice.width_ms==choice.proposed_width_ms;
       if(choice.coast) { last_coast_ms_=ms;last_coast_side_=side; }
       else { last_coast_ms_=0;last_coast_side_=0; }
     } else { last_coast_ms_=0;last_coast_side_=0; }
@@ -115,6 +120,8 @@ class Controller {
     if(initial_peak_seen_ && paired && h.was_drive && std::isfinite(h.command_target)) {
       if(angle>h.command_target+1.5f)h.evidence=2;
       else if(!h.temporary_cap_trial && angle<h.command_target-.5f && h.command_ms==h.width_ms)h.evidence=1;
+      else if(h.taper_learning && h.command_target==8.f && angle<h.command_target-1.f &&
+              h.command_ms<h.width_ms && h.width_ms<80)h.evidence=4;
       else h.evidence=3;
     }
     h.confirmed=false;h.cross_ms=0;
@@ -187,12 +194,15 @@ class Controller {
       if(cap>h.elapsed_ms-30)cap=static_cast<uint16_t>(h.elapsed_ms-30);
     }
     if(recovery && cap>15)cap=15;
+    const bool uncapped_side_limit=(cap==h.width_ms && !recovery);
     if(in.crossing_rate_dps>low_rate && cap>20) {
+      const uint16_t before_taper=cap;
       const float fraction=std::fmax(0.f,(high_rate-in.crossing_rate_dps)/(high_rate-low_rate));
       cap=static_cast<uint16_t>(20.f+(cap-20)*fraction);
+      out.speed_tapered=uncapped_side_limit && cap>20 && cap<before_taper;
     }
     if(!cap)return Choice{};
-    out.selected=true;out.current_ma=1200;out.width_ms=cap;return out;
+    out.selected=true;out.current_ma=1200;out.width_ms=cap;out.proposed_width_ms=cap;return out;
   }
 
  private:
@@ -201,7 +211,7 @@ class Controller {
     uint32_t peak_ms=0,cross_ms=0,paired_ms=0;
     uint16_t elapsed_ms=0,command_ms=0,width_ms=60;
     uint8_t under_count=0,evidence=0;
-    bool confirmed=false,was_drive=false,temporary_cap_trial=false;
+    bool confirmed=false,was_drive=false,temporary_cap_trial=false,taper_learning=false;
   };
   static unsigned index(int side){return side>0?1u:0u;}
   void clearPair(){pair_mask_=0;good_pairs_=0;pair_good_=true;history_[0].evidence=history_[1].evidence=0;}
@@ -215,7 +225,16 @@ class Controller {
         h.under_count=0;
         h.width_ms=h.width_ms<140 ? static_cast<uint16_t>(h.width_ms+10) : 150;
       }
-    } else if(h.evidence==3)h.under_count=0;
+    } else if(h.evidence==4) {
+      // At the final 8-degree target, two paired, unmodified, tapered
+      // commands with >1 degree undershoot allow a small cap increase.
+      // This does not claim the pulse produced the observed peak.
+      if(++h.under_count>=2) {
+        h.under_count=0;
+        h.width_ms=static_cast<uint16_t>(h.width_ms+5);
+        if(h.width_ms>80)h.width_ms=80;
+      }
+    } else h.under_count=0;
     h.evidence=0;
   }
   History history_[2];

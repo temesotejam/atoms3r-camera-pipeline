@@ -3837,7 +3837,9 @@ bool ExperimentRunner::tryTiltPriorityImpl(
     return true;
   }
   if(stall_rescue_event_ && !choice.coast)weak_side_assist_.interrupt();
-  tilt_priority_.confirm(in.next_side,t_test_ms,choice,true,negative_probe_selected || sway_probe_selected);
+  tilt_priority_.confirm(in.next_side,t_test_ms,choice,true,negative_probe_selected || sway_probe_selected,
+      !sway_probe_path && !negative_probe_path && !foot_adjusted &&
+      !(foot_candidate_eligible && foot_guarded_candidate!=foot_guarded_current) && !long_foot_balance_.trialActive());
   if(sway_probe_path)positive_sway_probe_.confirm(t_test_ms,sway_guarded_baseline,choice.width_ms,
       !choice.coast && sway_probe_selected,sway_probe_start);
   if(sway_probe_path)event.weak_probe_executed=sway_probe_selected;
