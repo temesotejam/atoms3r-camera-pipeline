@@ -24,6 +24,7 @@
 #include "weak_side_assist.h"
 #include "positive_left_boost.h"
 #include "tilt_priority.h"
+#include "positive_sway_probe.h"
 #include "wheel_cycle_guard.h"
 #include "target12_state_work.h"
 #include "peak_error_adaptation.h"
@@ -854,4 +855,5 @@ private:
   float negative_preceding_positive_peaks_[8] = {NAN,NAN,NAN,NAN,NAN,NAN,NAN,NAN};
   uint32_t negative_preceding_positive_peak_ms_[8] = {};
   uint8_t span_positive_branch_[8] = {};
+  positive_sway_probe::Controller positive_sway_probe_;
 };

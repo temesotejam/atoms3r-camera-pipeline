@@ -2581,7 +2581,7 @@ void ExperimentRunner::resetEnergyControlAutonomous() {
   for(auto& peak:negative_preceding_positive_peaks_)peak=NAN;
   for(auto& ms:negative_preceding_positive_peak_ms_)ms=0;
   for(auto& branch:span_positive_branch_)branch=0;
-  positive_left_boost_.reset();positive_left_input_=positive_left_boost::Input{};tilt_priority_.reset();wheel_cycle_guard_.reset();span_observer_sequence_=0;
+  positive_left_boost_.reset();positive_left_input_=positive_left_boost::Input{};tilt_priority_.reset();wheel_cycle_guard_.reset();positive_sway_probe_.reset();span_observer_sequence_=0;
   span_positive_decision_next_=0;
   for (auto& x:span_positive_decisions_) x=SpanPositiveDecision{};
   for (auto& x:span_positive_context_) x=SpanPositiveContext{};
@@ -3031,11 +3031,17 @@ void ExperimentRunner::processFootSpanCycle() {
       span.start_ms>long_foot_balance_.lastChangeMs() && positives==1 && positive &&
       positive->executed && positive->sign==1 && positive_branch==15;
   const bool negative_was_active=negative_cap_recovery_.active();
+  const bool sway_was_active=positive_sway_probe_.active();
+  positive_sway_probe_.cycle(cycle.start_ms,cycle.end_ms,cycle.left,cycle.right,plus_peak,cycle.negative_peak,
+      observable && cycle.complete,hardware_healthy,neutral_foot_context,
+      positives==1 && positive && positive->executed && positive_sway_probe_.effectiveCommand(positive->ms));
   negative_cap_recovery_.footCycle(span.start_ms,span.end_ms,cycle.left,cycle.right,
       observable,hardware_healthy,neutral_foot_context);
   long_foot_balance_.observeCycle(cycle.start_ms,cycle.end_ms,cycle.left,cycle.right,
       plus_peak,cycle.negative_peak,observable && negative_cap_recovery::normalFootReferenceAllowed(
-          negative_was_active,negative_cap_recovery_.active(),span.start_ms,negative_recovery_last_applied_ms_),hardware_healthy,
+          negative_was_active,negative_cap_recovery_.active(),span.start_ms,negative_recovery_last_applied_ms_) &&
+      !sway_was_active && !positive_sway_probe_.active() &&
+      (!positive_sway_probe_.lastApplied() || cycle.start_ms>positive_sway_probe_.lastApplied()),hardware_healthy,
       positives==1 && positive && positive->executed &&
       foot_trial_effective_[positive_index] &&
       foot_trial_generation_[positive_index]==long_foot_balance_.trialGeneration());
@@ -3675,7 +3681,7 @@ bool ExperimentRunner::tryTiltPriorityImpl(
       event.pre_input_wheel_speed_valid && event.pre_input_wheel_speed_age_us<=50000 &&
       std::isfinite(event.pre_input_wheel_speed_rpm);
   if(healthy_out)*healthy_out=in.hardware_healthy;
-  if(!in.hardware_healthy) {wheel_cycle_guard_.reset();long_foot_balance_.reset();}
+  if(!in.hardware_healthy) {wheel_cycle_guard_.reset();long_foot_balance_.reset();positive_sway_probe_.interrupt();}
   // The timeout and unhealthy hardware must cancel even on a positive input.
   // The v1.0.91 negative-side probe did not improve the observed run. Keep
   // its audit/observer code, but suppress new or continuing interventions
@@ -3690,7 +3696,7 @@ bool ExperimentRunner::tryTiltPriorityImpl(
   // Record every accepted healthy crossing, even when ordinary control is
   // selected. It will be paired with the corresponding measured peak.
   if(in.hardware_healthy)tilt_priority_.crossing(in.next_side,t_test_ms);
-  if(!choice.selected) {negative_cap_recovery_.interrupt();return false;}
+  if(!choice.selected) {negative_cap_recovery_.interrupt();if(in.next_side>0)positive_sway_probe_.interrupt();return false;}
   if(choice.coast && negative_cap_recovery_.active())negative_cap_recovery_.interrupt();
   // Preserve one owner for positive-width feedback. Evaluate its currently
   // applied setting and new proposal against the identical guard history.
@@ -3703,7 +3709,32 @@ bool ExperimentRunner::tryTiltPriorityImpl(
   const auto wheel_guard_before=wheel_cycle_guard_;
   bool negative_probe_path=false,negative_probe_start=false,negative_probe_selected=false;
   uint16_t negative_guarded_baseline=0,negative_guarded_candidate=0;
-  if(!stall_rescue_event_ && !choice.coast && in.next_side>0 &&
+  bool sway_probe_path=false,sway_probe_start=false,sway_probe_selected=false;
+  uint16_t sway_guarded_baseline=0,sway_guarded_candidate=0;
+  const bool sway_eligible=!stall_rescue_event_ && !choice.coast && in.next_side>0 &&
+      in.target_deg==8.f && !negative_cap_recovery_.active() && long_foot_balance_.idleForNegativeTrial();
+  if(in.next_side>0) {
+    sway_probe_start=!positive_sway_probe_.active() && positive_sway_probe_.candidate(t_test_ms,in.hardware_healthy,sway_eligible);
+    sway_probe_path=positive_sway_probe_.request(t_test_ms,in.hardware_healthy,sway_eligible) && sway_eligible;
+  }
+  if(sway_probe_path) {
+    auto baseline_guard=wheel_guard_before;
+    sway_guarded_baseline=baseline_guard.limit(in.next_side,event.pre_input_wheel_speed_rpm,
+        in.hardware_healthy,t_test_ms,choice.width_ms);
+    auto trial_in=in;trial_in.positive_cap_extra_ms=5;
+    const auto trial=tilt_priority_.propose(trial_in);
+    auto candidate_guard=wheel_guard_before;
+    if(trial.selected && !trial.coast && trial.direction==choice.direction && trial.current_ma==choice.current_ma) {
+      sway_guarded_candidate=candidate_guard.limit(in.next_side,event.pre_input_wheel_speed_rpm,
+          in.hardware_healthy,t_test_ms,trial.width_ms);
+      const int delta=static_cast<int>(sway_guarded_candidate)-static_cast<int>(sway_guarded_baseline);
+      if(delta>0 && delta<=5) {choice=trial;choice.width_ms=sway_guarded_candidate;wheel_cycle_guard_=candidate_guard;sway_probe_selected=true;}
+    }
+    if(!sway_probe_selected){choice.width_ms=sway_guarded_baseline;wheel_cycle_guard_=baseline_guard;}
+    event.setFootSpanFlag(PsramLogger::EnergyControlAutonomousZeroCrossEvent::PositiveSwayProbe,true);
+    event.weak_probe_baseline_ms=static_cast<uint8_t>(sway_guarded_baseline);
+    event.weak_probe_requested_ms=static_cast<uint8_t>(sway_guarded_candidate);
+  } else if(!stall_rescue_event_ && !choice.coast && in.next_side>0 &&
       choice.width_ms<=100 && tilt_priority_.target()>=6.f && !negative_cap_recovery_.active()) {
     foot_path_active=true;
     const uint16_t baseline=choice.width_ms;
@@ -3789,7 +3820,8 @@ bool ExperimentRunner::tryTiltPriorityImpl(
   event.valid=false;event.output_executed=false;
   if(!choice.coast && !beginEnergyControlAutonomousPulse(run_start_ms_+t_test_ms,t_test_ms,
                                         choice.direction,choice.width_ms,choice.current_ma)) {
-    if(foot_path_active || negative_probe_path)wheel_cycle_guard_=wheel_guard_before;
+    if(foot_path_active || negative_probe_path || sway_probe_path)wheel_cycle_guard_=wheel_guard_before;
+    if(sway_probe_path)positive_sway_probe_.interrupt();
     if(negative_probe_path)negative_cap_recovery_.command(t_test_ms,negative_guarded_baseline,
         negative_guarded_candidate,false,negative_probe_start);
     if(in.next_side<0) {
@@ -3805,7 +3837,13 @@ bool ExperimentRunner::tryTiltPriorityImpl(
     return true;
   }
   if(stall_rescue_event_ && !choice.coast)weak_side_assist_.interrupt();
-  tilt_priority_.confirm(in.next_side,t_test_ms,choice,true,negative_probe_selected);
+  tilt_priority_.confirm(in.next_side,t_test_ms,choice,true,negative_probe_selected || sway_probe_selected);
+  if(sway_probe_path)positive_sway_probe_.confirm(t_test_ms,sway_guarded_baseline,choice.width_ms,
+      !choice.coast && sway_probe_selected,sway_probe_start);
+  if(sway_probe_path)event.weak_probe_executed=sway_probe_selected;
+  // Clear pre-probe foot reference when (and only when) the changed command
+  // was sent. Post-probe evidence must be collected entirely afresh.
+  if(sway_probe_start && sway_probe_selected)long_foot_balance_.reset();
   if(negative_probe_path) {
     negative_cap_recovery_.command(t_test_ms,negative_guarded_baseline,choice.width_ms,
         negative_probe_selected,negative_probe_start);

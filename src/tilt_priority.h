@@ -17,6 +17,7 @@ struct Input {
   int8_t next_side=0;
   uint16_t hardware_cap_ms=0;
   uint16_t negative_cap_extra_ms=0;
+  uint16_t positive_cap_extra_ms=0;
   bool hardware_healthy=false;
 };
 struct Choice {
@@ -175,6 +176,8 @@ class Controller {
     if(overshoot && !recovery) {out.selected=true;out.coast=true;return out;}
     uint16_t cap=in.hardware_cap_ms<150 ? in.hardware_cap_ms : 150;
     uint16_t side_cap=h.width_ms;
+    if(in.next_side>0 && in.target_deg==8.f && target_deg_==8.f && in.positive_cap_extra_ms)
+      side_cap=static_cast<uint16_t>(side_cap+(in.positive_cap_extra_ms<5 ? in.positive_cap_extra_ms : 5));
     if(in.next_side<0 && in.target_deg==8.f && target_deg_==8.f && in.negative_cap_extra_ms)
       side_cap=static_cast<uint16_t>(side_cap+(in.negative_cap_extra_ms<5 ? in.negative_cap_extra_ms : 5));
     if(side_cap<cap)cap=side_cap;

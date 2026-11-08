@@ -2,6 +2,7 @@
 #include "tilt_priority.h"
 #include "stall_rescue.h"
 #include "long_foot_balance.h"
+#include "positive_sway_probe.h"
 #include "negative_cap_recovery.h"
 #include "wheel_cycle_guard.h"
 #include "foot_span_control.h"
@@ -34,7 +35,7 @@ struct EnergyControlAutonomousZeroCrossEvent {
  float predicted_current_rise_tau_s=1,aligned_initial_current_mA=1;
  bool command_matches_zero_cross_motion=false,valid=false,output_executed=false;
  int16_t command_current_mA=0;uint16_t pulse_width_ms=0;uint32_t pulse_start_ms=0,pulse_end_ms=0;
- enum FootSpanFlag : uint16_t { Span_selected=2, NegativeRecoveryStateBit0=1u<<12, NegativeRecoveryStateBit1=1u<<13 };
+ enum FootSpanFlag : uint16_t { Span_selected=2, NegativeRecoveryStateBit0=1u<<12, NegativeRecoveryStateBit1=1u<<13, PositiveSwayProbe=1u<<14 };
  uint16_t foot_span_baseline_ms=0,foot_span_requested_ms=0,foot_span_flags=0;
  void setFootSpanFlag(FootSpanFlag f,bool v){if(v)foot_span_flags|=f;else foot_span_flags&=~f;}
 };
@@ -51,6 +52,7 @@ class ExperimentRunner {public:
  tilt_priority::Controller tilt_priority_;foot_span_control::Controller foot_span_control_;
  wheel_cycle_guard::Controller wheel_cycle_guard_;
  long_foot_balance::Controller long_foot_balance_;
+ positive_sway_probe::Controller positive_sway_probe_;
  negative_cap_recovery::Controller negative_cap_recovery_;
  uint32_t negative_recovery_last_applied_ms_=0;
  uint32_t foot_trial_pending_ms_=0,foot_trial_pending_generation_=0;
@@ -106,6 +108,33 @@ int main(){
   assert(r.negative_cap_recovery_.candidate(t,8.f,30,true,true));
   return t;
  };
+ // The production runner compares candidate and baseline through identical
+ // guards, claims a trial only after a real accepted +1..5ms command, and
+ // records a distinct audit marker. Fixture readings are constructed, not
+ // an assertion about physical robot response.
+ auto reduce_plus=[](ExperimentRunner& r,uint32_t t){
+  for(int n=0;n<4;++n)for(int side:{1,-1}) {tilt_priority::Choice c;c.selected=true;c.current_ma=1200;
+   c.direction=static_cast<int8_t>(side);c.width_ms=r.tilt_priority_.widthLimit(side);c.target_deg=8;
+   r.tilt_priority_.crossing(c.direction,t);r.tilt_priority_.confirm(c.direction,t,c,true);
+   r.tilt_priority_.peak(c.direction,t+180,side>0?10.f:6.f);t+=300;}
+  for(int side:{1,-1}) {tilt_priority::Choice c;c.selected=true;c.current_ma=1200;
+   c.direction=static_cast<int8_t>(side);c.width_ms=r.tilt_priority_.widthLimit(side);c.target_deg=8;
+   r.tilt_priority_.crossing(c.direction,t);r.tilt_priority_.confirm(c.direction,t,c,true);
+   r.tilt_priority_.peak(c.direction,t+180,side>0?4.f:6.f);t+=300;}
+  return t;};
+ {ExperimentRunner r;auto t=reduce_plus(r,prepare_negative(r));
+  for(unsigned i=0;i<4;++i){const auto start=t-2800+i*700;
+    r.positive_sway_probe_.cycle(start,start+700,2,2,4,6,true,true,true,false);}
+  Event e;assert(r.tryTiltPriority(e,t));
+  assert(e.output_executed && (e.foot_span_flags & Event::PositiveSwayProbe));
+  assert(e.weak_probe_executed && e.weak_probe_requested_ms>e.weak_probe_baseline_ms);
+  assert(e.weak_probe_requested_ms-e.weak_probe_baseline_ms<=5 && r.positive_sway_probe_.active());
+  assert(!r.long_foot_balance_.trialActive());}
+ {ExperimentRunner r;auto t=reduce_plus(r,prepare_negative(r));
+  for(unsigned i=0;i<4;++i){const auto start=t-2800+i*700;
+    r.positive_sway_probe_.cycle(start,start+700,2,2,4,6,true,true,true,false);}
+  r.begin_ok=false;Event e;assert(r.tryTiltPriority(e,t));
+  assert(!e.output_executed && !r.positive_sway_probe_.active() && !r.positive_sway_probe_.attempted());}
  // Even when all old negative-recovery evidence is present, the ordinary
  // protected command is sent and the trial cannot start.
  {ExperimentRunner r;auto t=prepare_negative(r);Event e;e.physical_next_peak_side=-1;

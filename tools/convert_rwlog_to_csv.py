@@ -45,18 +45,20 @@ SAMPLE_FORMAT_V56 = '<' + ''.join(field[0] for field in FIELDS_V56)
 CSV_COLUMNS_V56 = ['time_s'] + [field[1] for field in FIELDS_V56] + ['roller_position_deg']
 
 
-def expand_tables(value):
+def expand_tables(value, version=None):
     """Expand v53 lossless column tables for existing analysis/CSV consumers."""
     if isinstance(value, dict):
+        version = value.get('firmware_revision', version)
         if set(value) == {'fields', 'rows'}:
             fields, rows = value['fields'], value['rows']
             if len(set(fields)) != len(fields) or any(len(row) != len(fields) for row in rows):
                 raise ValueError('Invalid compact table')
-            return [expand_tables(dict(zip(fields, row))) for row in rows]
-        result = {key: expand_tables(item) for key, item in value.items()}
+            return [expand_tables(dict(zip(fields, row)), version) for row in rows]
+        result = {key: expand_tables(item, version) for key, item in value.items()}
         if 'foot_span_flags' in result:
             mask = result['foot_span_flags']
-            if type(mask) is not int or mask < 0 or mask >= (1 << 14):
+            bits = 15 if version == '1.0.95-positive-sway-probe' else 14
+            if type(mask) is not int or mask < 0 or mask >= (1 << bits):
                 raise ValueError('Invalid foot span flag mask')
             names = ('valid','selected','startup','left_low','right_low','left_both',
                      'right_both','continuous','left_outlier','right_outlier',
@@ -71,7 +73,7 @@ def expand_tables(value):
             result.setdefault('foot_phase_selected', False)
         return result
     if isinstance(value, list):
-        return [expand_tables(item) for item in value]
+        return [expand_tables(item, version) for item in value]
     return value
 
 HEADER_FORMAT = "<8sHHIQIIIIHHHHHHHHHIIIII8I"
@@ -1154,6 +1156,7 @@ ENERGY_CONTROL_AUTONOMOUS_ZERO_CROSS_COLUMNS = [
     "weak_probe_baseline_ms", "weak_probe_requested_ms", "weak_probe_executed",
     "long_foot_counterfactual_ms", "long_foot_actual_ms", "long_foot_effective",
     "negative_recovery_baseline_ms", "negative_recovery_candidate_ms", "negative_recovery_executed", "negative_recovery_state",
+    "positive_sway_probe_baseline_ms", "positive_sway_probe_candidate_ms", "positive_sway_probe_executed",
     "foot_span_state", "foot_span_accepted_cycles", "foot_span_valid", "foot_span_selected",
     "foot_span_startup", "foot_span_left_low", "foot_span_right_low", "foot_span_left_both",
     "foot_span_right_both", "foot_span_continuous", "foot_span_left_outlier", "foot_span_right_outlier",
@@ -1181,7 +1184,12 @@ def write_energy_control_autonomous_events(metadata: dict, out_dir: Path) -> tup
             writer.writeheader()
             for event in zeros:
                 if isinstance(event, dict):
-                    if metadata.get("firmware_revision") in ("1.0.91-two-cycle-recovery", "1.0.92-paired-foot-sequence", "1.0.93-blocked-candidate-retry", "1.0.94-foot-trial-loss") and event.get("physical_next_peak_side") == -1:
+                    if metadata.get("firmware_revision") == "1.0.95-positive-sway-probe" and int(event.get("foot_span_flags", 0)) & (1 << 14):
+                        event = dict(event)
+                        event["positive_sway_probe_baseline_ms"] = event.pop("long_foot_counterfactual_ms", None)
+                        event["positive_sway_probe_candidate_ms"] = event.pop("long_foot_actual_ms", None)
+                        event["positive_sway_probe_executed"] = event.pop("long_foot_effective", None)
+                    elif metadata.get("firmware_revision") in ("1.0.91-two-cycle-recovery", "1.0.92-paired-foot-sequence", "1.0.93-blocked-candidate-retry", "1.0.94-foot-trial-loss", "1.0.95-positive-sway-probe") and event.get("physical_next_peak_side") == -1:
                         event = dict(event)
                         event["negative_recovery_baseline_ms"] = event.pop("long_foot_counterfactual_ms", None)
                         event["negative_recovery_candidate_ms"] = event.pop("long_foot_actual_ms", None)

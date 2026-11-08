@@ -396,6 +396,7 @@ class PsramLogger {
       Span_right_edge_unverified=uint16_t(1u<<11),
       NegativeRecoveryStateBit0=uint16_t(1u<<12),
       NegativeRecoveryStateBit1=uint16_t(1u<<13),
+      PositiveSwayProbe=uint16_t(1u<<14),
     };
     uint16_t foot_span_flags=0;
     void setFootSpanFlag(FootSpanFlag flag,bool value) {
