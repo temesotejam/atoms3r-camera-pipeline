@@ -137,6 +137,32 @@ class Controller {
     // even if the measured peak is low; a large overshoot holds the stage.
     if(angle>target_deg_+1.5f)pair_good_=false;
     if(pair_mask_==3u) {
+      // Side-cap exploration must not run away while the two rocking peaks
+      // diverge. Only undo cap increases made by the tapered-recovery rule;
+      // ordinary controller and its protections remain in force.
+      if(target_deg_==8.f && history_[0].paired_ms==history_[0].peak_ms &&
+         history_[1].paired_ms==history_[1].peak_ms) {
+        const float gap=std::fabs(history_[1].peak_deg-history_[0].peak_deg);
+        if(gap>=1.5f) {
+          balanced_pairs_=0;
+          if(unequal_pairs_<2)++unequal_pairs_;
+          if(unequal_pairs_>=2 && !recovery_locked_) {
+            recovery_locked_=true;
+            for(auto& h:history_) {
+              if(h.recovery_extra_ms) {
+                h.width_ms=h.width_ms>h.recovery_extra_ms+20 ?
+                    static_cast<uint16_t>(h.width_ms-h.recovery_extra_ms) : 20;
+              }
+              h.recovery_extra_ms=0;h.under_count=0;
+              if(h.evidence==4)h.evidence=3;
+            }
+          }
+        } else if(recovery_locked_ && gap<=.8f) {
+          unequal_pairs_=0;
+          if(++balanced_pairs_>=3) {recovery_locked_=false;balanced_pairs_=0;}
+        } else {unequal_pairs_=0;balanced_pairs_=0;}
+      } else {unequal_pairs_=0;balanced_pairs_=0;}
+      if(recovery_locked_)for(auto& h:history_)if(h.evidence==4)h.evidence=3;
       updateWidth(history_[0]);updateWidth(history_[1]);
       if(pair_good_)++good_pairs_;else good_pairs_=0;
       if(good_pairs_>=2) {target_deg_=std::fmin(8.f,target_deg_+.5f);good_pairs_=0;}
@@ -209,15 +235,16 @@ class Controller {
   struct History {
     float peak_deg=NAN,command_target=NAN;
     uint32_t peak_ms=0,cross_ms=0,paired_ms=0;
-    uint16_t elapsed_ms=0,command_ms=0,width_ms=60;
+    uint16_t elapsed_ms=0,command_ms=0,width_ms=60,recovery_extra_ms=0;
     uint8_t under_count=0,evidence=0;
     bool confirmed=false,was_drive=false,temporary_cap_trial=false,taper_learning=false;
   };
   static unsigned index(int side){return side>0?1u:0u;}
-  void clearPair(){pair_mask_=0;good_pairs_=0;pair_good_=true;history_[0].evidence=history_[1].evidence=0;}
+  void clearPair(){pair_mask_=0;good_pairs_=0;pair_good_=true;unequal_pairs_=balanced_pairs_=0;history_[0].evidence=history_[1].evidence=0;}
   static void updateWidth(History& h) {
     if(h.evidence==2) {
       h.under_count=0;
+      h.recovery_extra_ms=0;
       const uint16_t used=h.command_ms<h.width_ms ? h.command_ms : h.width_ms;
       h.width_ms=used>30 ? static_cast<uint16_t>(used-10) : 20;
     } else if(h.evidence==1) {
@@ -231,8 +258,10 @@ class Controller {
       // This does not claim the pulse produced the observed peak.
       if(++h.under_count>=2) {
         h.under_count=0;
+        const uint16_t previous_width=h.width_ms;
         h.width_ms=static_cast<uint16_t>(h.width_ms+5);
         if(h.width_ms>80)h.width_ms=80;
+        h.recovery_extra_ms=static_cast<uint16_t>(h.recovery_extra_ms+h.width_ms-previous_width);
       }
     } else h.under_count=0;
     h.evidence=0;
@@ -240,6 +269,8 @@ class Controller {
   History history_[2];
   float target_deg_=4.5f;
   uint8_t pair_mask_=0,good_pairs_=0;
+  uint8_t unequal_pairs_=0,balanced_pairs_=0;
+  bool recovery_locked_=false;
   uint8_t foot_weak_count_=0;
   uint32_t foot_end_=0;
   uint32_t last_coast_ms_=0;

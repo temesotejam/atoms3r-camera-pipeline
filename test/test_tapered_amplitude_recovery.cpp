@@ -23,6 +23,14 @@ static void start(Controller& c,uint32_t& now){
   cycles(c,now,14,3.f);
   assert(c.target()==8.f);
 }
+static void asymmetric(Controller& c,uint32_t& now,unsigned count){
+  for(unsigned i=0;i<count;++i)for(int side:{-1,1}) {
+    Input in;in.now_ms=now;in.preset_deg=8;in.target_deg=8;in.crossing_rate_dps=48;
+    in.next_side=side;in.hardware_cap_ms=150;in.hardware_healthy=true;
+    auto out=c.propose(in);assert(out.selected&&!out.coast);
+    c.crossing(side,now);c.confirm(side,now,out,true);c.peak(side,now+170,side>0?7.f:5.f);now+=350;
+  }
+}
 int main(){
   Controller good;uint32_t t;start(good,t);
   auto before=good.widthLimit(1);cycles(good,t,2,5.5f);
@@ -38,4 +46,10 @@ int main(){
   cycles(interrupted,t,1,5.5f);assert(interrupted.widthLimit(1)==before);
   Controller bounded;start(bounded,t);cycles(bounded,t,16,5.5f);
   assert(bounded.widthLimit(1)==80 && bounded.widthLimit(-1)==80);
+  Controller rollback;start(rollback,t);before=rollback.widthLimit(1);
+  cycles(rollback,t,4,5.5f);assert(rollback.widthLimit(1)==before+10);
+  asymmetric(rollback,t,2);assert(rollback.widthLimit(1)==before && rollback.widthLimit(-1)==before);
+  asymmetric(rollback,t,4);assert(rollback.widthLimit(1)==before && rollback.widthLimit(-1)==before);
+  cycles(rollback,t,2,5.5f);assert(rollback.widthLimit(1)==before);
+  cycles(rollback,t,4,5.5f);assert(rollback.widthLimit(1)>before);
 }
