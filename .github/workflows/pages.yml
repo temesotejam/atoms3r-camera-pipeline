@@ -3,12 +3,13 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  pull_request:
 permissions:
   contents: read
   pages: write
   id-token: write
 concurrency:
-  group: pages
+  group: pages-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'live' }}
   cancel-in-progress: true
 jobs:
   pages-ready:
@@ -40,8 +41,102 @@ jobs:
           print('GitHub Pages is enabled' if enabled else
                 'GitHub Pages is not enabled; site deployment will wait for repository setup')
           PY
-  build-site:
+  build-camera-diagnostics:
     needs: pages-ready
+    if: needs.pages-ready.outputs.enabled == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [0, 1, 2]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 2fdac86a87f529cffbe2219dfaaf07318b0575c7
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify existing host tests
+        run: |
+          bash tools/test_runtime.sh
+          python3 tools/test_prepare_camera_compare_package.py
+      - name: Install PlatformIO
+        run: pip install platformio
+      - name: Build selected ESP32-S3 mode
+        env:
+          MODE: ${{ matrix.mode }}
+          HEAD_SHA: 2fdac86a87f529cffbe2219dfaaf07318b0575c7
+        run: |
+          set -euxo pipefail
+          cat >> platformio.ini <<'EOF'
+
+          [env:camera_compare]
+          extends = env:atoms3cam
+          build_flags =
+            ${env:atoms3cam.build_flags}
+          EOF
+          printf '  -DFOOT_FAST_CAPTURE_EXPERIMENT=%s\n' "$MODE" >> platformio.ini
+          printf '%s\n' '  -DCAMERA_DIAGNOSTIC_ONLY=1' >> platformio.ini
+          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+          for i in 0 1 2 3 4; do
+            printf '  -DCAMERA_BUILD_SHA_%s=0x%sUL\n' "$i" "${HEAD_SHA:$((i*8)):8}" >> platformio.ini
+          done
+          pio pkg install -e camera_compare
+          python3 tools/verify_madgwick_dependency.py --library '.pio/libdeps/camera_compare/Adafruit AHRS'
+          pio run -e camera_compare
+          python3 tools/verify_madgwick_dependency.py --library '.pio/libdeps/camera_compare/Adafruit AHRS'
+          ELF=.pio/build/camera_compare/firmware.elf
+          OBJDUMP="$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-objdump"
+          NM="$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-nm"
+          python3 tools/verify_camera_task_link.py "$ELF" --objdump "$OBJDUMP"
+          python3 tools/verify_log_encoder_link.py "$ELF" --nm "$NM"
+          python3 tools/verify_realtime_code_link.py "$ELF" --objdump "$OBJDUMP"
+          python3 tools/verify_imu_transport_link.py "$ELF" --nm "$NM"
+          python3 tools/verify_core_isolation_link.py "$ELF" --objdump "$OBJDUMP"
+          python3 tools/verify_motion_acquisition_link.py "$ELF" --objdump "$OBJDUMP"
+          "$NM" "$ELF" | grep -q '__wrap_xTaskCreatePinnedToCore'
+          for sym in cam_start cam_stop cam_take; do "$NM" "$ELF" | grep -q " $sym$"; done
+          test -s madgwick-build-patch.json
+          test -s bmi270-build-patch.json
+      - name: Package identified Web Serial flasher
+        env:
+          MODE: ${{ matrix.mode }}
+          HEAD_SHA: 2fdac86a87f529cffbe2219dfaaf07318b0575c7
+        run: |
+          set -euxo pipefail
+          mkdir -p camera-artifact/firmware
+          cp .pio/build/camera_compare/{bootloader.bin,partitions.bin,firmware.bin} camera-artifact/firmware/
+          cp "$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin" camera-artifact/firmware/
+          cp bmi270-build-patch.json madgwick-build-patch.json camera-artifact/
+          python3 tools/prepare_camera_compare_package.py --mode "$MODE" --commit "$HEAD_SHA" --checkout-commit "$(git rev-parse HEAD)" --output camera-artifact
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('camera-artifact')
+          manifest_path = root / 'manifest.json'
+          manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+          manifest['new_install_prompt_erase'] = True
+          manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          html_path = root / 'index.html'
+          html = html_path.read_text(encoding='utf-8')
+          needle = '<script type="module" src="https://unpkg.com/esp-web-tools@10.1.1/'
+          assert html.count(needle) == 1
+          html = html.replace(needle, '<script src="../../flasher-completion.js?v=20261103"></script>\n' + needle)
+          notice = '<p><strong>消去の確認が表示された場合、「Erase device」にチェックを入れないでください。</strong></p>'
+          assert '</body></html>' in html
+          html_path.write_text(html.replace('</body></html>', notice + '</body></html>'), encoding='utf-8')
+          PY
+          git checkout -- platformio.ini
+          git diff --exit-code
+      - uses: actions/upload-artifact@v4
+        with:
+          name: camera-mode-${{ matrix.mode }}
+          path: camera-artifact/
+          if-no-files-found: error
+          retention-days: 30
+  build-site:
+    needs: [pages-ready, build-camera-diagnostics]
     if: needs.pages-ready.outputs.enabled == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -87,6 +182,22 @@ jobs:
           printf '%s\n' "$GITHUB_SHA" > _site/build-sha.txt
           (cd _site/firmware && sha256sum *.bin > SHA256SUMS.txt)
           git diff --exit-code
+      - name: Include three verified camera diagnostics
+        uses: actions/download-artifact@v4
+        with:
+          pattern: camera-mode-*
+          path: _site/camera
+      - name: Verify diagnostic assets preserve the stable flash layout
+        run: |
+          set -euxo pipefail
+          for mode in 0 1 2; do
+            d="_site/camera/camera-mode-$mode"
+            test -f "$d/index.html"
+            for file in bootloader.bin partitions.bin boot_app0.bin; do
+              cmp "_site/firmware/$file" "$d/firmware/$file"
+            done
+            python3 tools/verify_camera_pages.py --path "$d" --mode "$mode"
+          done
       - uses: actions/configure-pages@v5
         with:
           enablement: true
@@ -94,6 +205,7 @@ jobs:
         with:
           path: _site
   deploy:
+    if: github.event_name != 'pull_request'
     needs: build-site
     runs-on: ubuntu-latest
     environment:
@@ -175,3 +287,11 @@ jobs:
           else:
               raise SystemExit('Live Web Flasher verification failed: ' + str(last_error))
           PY
+      - name: Verify published camera diagnostics
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          set -euxo pipefail
+          for mode in 0 1 2; do
+            python3 tools/verify_camera_pages.py --url "${PAGE_URL%/}/camera/camera-mode-$mode/" --mode "$mode"
+          done

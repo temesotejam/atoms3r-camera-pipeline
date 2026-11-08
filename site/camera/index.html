@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>カメラ比較用ファームウェア</title>
+<script src="../flasher-completion.js?v=20261103"></script>
+<script type="module" src="https://unpkg.com/esp-web-tools@10.1.1/dist/web/install-button.js?module"></script>
+<style>body{font:16px/1.7 system-ui,sans-serif;max-width:800px;margin:2rem auto;padding:0 1rem;color:#16243a}section{padding:1rem;margin:1rem 0;background:#f1f6fa;border-radius:12px}button{font-size:1rem;font-weight:600;padding:.75rem 1.2rem;border:0;border-radius:8px;color:white;background:#2161a4;cursor:pointer}.note{border-left:4px solid #be6c0a;padding:.2rem 1rem;background:#fff5dc}</style>
+</head><body><h1>カメラ比較用ファームウェア</h1>
+<p>機体をUSBで接続し、PCのChromeまたはEdgeで使うモードの書込みボタンを押してください。ポートを選ぶと書込みを開始します。</p>
+<div class="note"><strong>受動観測専用・実機未検証</strong><p>非ゼロ電流指令を禁止し、約60秒のカメラ観測を行います。通常の歩行試験には使えません。終了後は<a href="../">通常の歩行用ファームウェア</a>を書き戻してください。</p>
+<p>消去確認が表示された場合、「Erase device」にチェックを入れないでください。保存済みデータを消去する設定です。</p></div>
+<section><h2>モード0：基準</h2><p>従来の撮影待機時間を用いる比較用です。</p><esp-web-install-button manifest="camera-mode-0/manifest.json"><button slot="activate">モード0を書き込む</button><span slot="unsupported">PCのChromeまたはEdgeを使用してください。</span></esp-web-install-button></section>
+<section><h2>モード1：待機短縮</h2><p>カメラ処理後の待機を短くした条件です。</p><esp-web-install-button manifest="camera-mode-1/manifest.json"><button slot="activate">モード1を書き込む</button><span slot="unsupported">PCのChromeまたはEdgeを使用してください。</span></esp-web-install-button></section>
+<section><h2>モード2：バッファ早期返却</h2><p>待機短縮に加え、画像をコピーしてカメラバッファを早く返します。</p><esp-web-install-button manifest="camera-mode-2/manifest.json"><button slot="activate">モード2を書き込む</button><span slot="unsupported">PCのChromeまたはEdgeを使用してください。</span></esp-web-install-button></section>
+<p>記録の開始時は直立姿勢で同期し、観測後はログ転送が終わるまで待ってください。保存したログにモード番号を添えてください。</p>
+<p>ビルド元: <code>2fdac86a87f529cffbe2219dfaaf07318b0575c7</code></p></body></html>
