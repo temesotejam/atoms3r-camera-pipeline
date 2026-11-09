@@ -7,7 +7,7 @@ import shutil
 import urllib.request
 from pathlib import Path
 
-COMMIT = 'a048c40d3307e3ce000ae9afc20d0b650b88d9eb'
+COMMIT = '08f323034298e6411405defe3420b339ab302979'
 BUILD_ID = 'early-input-geometry-v1'
 PARTS = {'firmware/bootloader.bin': 0, 'firmware/partitions.bin': 32768,
          'firmware/boot_app0.bin': 57344, 'firmware/firmware.bin': 65536}
@@ -104,6 +104,7 @@ def package(source, stable, dest):
 <body><h1>早期入力の実機試験版</h1>
 <p><strong>モータ出力が変化し得る実機試験版です。実機での効果・動作は未検証です。</strong></p>
 <p>足の観測と幾何の条件が成立した場合、ZEROより前に入力を試みます。条件が成立しない場合は通常のタイミングに戻ります。候補が一度も成立しない可能性があり、安全条件や故障等により出力自体も保証されません。</p>
+<p>画像時刻±20msと前後姿勢の原点±2°は暫定仮定であり、実際の撮影・姿勢を保証しません。候補判定と入力開始の実機遅延、制御周期への影響も未確認です。</p>
 <p>Chrome または Edge で機体を USB 接続し、下のボタンからポートを選んでください。消去確認が表示された場合、<strong>Erase device にチェックを入れないでください。</strong></p>
 <esp-web-install-button manifest="{prefix}manifest.json"><button slot="activate">早期入力試験版を書き込む</button><span slot="unsupported">Chrome または Edge を使用してください。</span></esp-web-install-button>
 <p>試験版 ID: <code>{BUILD_ID}</code><br>ソース: <code>{COMMIT}</code></p>
