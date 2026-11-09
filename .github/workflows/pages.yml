@@ -135,8 +135,60 @@ jobs:
           path: camera-artifact/
           if-no-files-found: error
           retention-days: 30
+  build-foot-observation:
+    needs: pages-ready
+    if: needs.pages-ready.outputs.enabled == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: a50c80e3f9c697ad2767b356dfd1a2a96c8d4f1d
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify pinned source and host tests
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = a50c80e3f9c697ad2767b356dfd1a2a96c8d4f1d
+          grep -q 'RUNTIME_DIAGNOSTIC_BUILD_ID "foot-control-observation-v1"' src/runtime_diagnostics.h
+          bash tools/test_runtime.sh
+      - name: Install PlatformIO
+        run: pip install platformio
+      - name: Build and verify diagnostic firmware
+        run: |
+          set -euxo pipefail
+          pio pkg install -e atoms3cam
+          python3 tools/verify_madgwick_dependency.py --library '.pio/libdeps/atoms3cam/Adafruit AHRS'
+          pio run -e atoms3cam
+          python3 tools/verify_madgwick_dependency.py --library '.pio/libdeps/atoms3cam/Adafruit AHRS'
+          ELF=.pio/build/atoms3cam/firmware.elf
+          OBJDUMP="$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-objdump"
+          NM="$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-nm"
+          python3 tools/verify_camera_task_link.py "$ELF" --objdump "$OBJDUMP"
+          python3 tools/verify_log_encoder_link.py "$ELF" --nm "$NM"
+          python3 tools/verify_realtime_code_link.py "$ELF" --objdump "$OBJDUMP"
+          python3 tools/verify_imu_transport_link.py "$ELF" --nm "$NM"
+          python3 tools/verify_core_isolation_link.py "$ELF" --objdump "$OBJDUMP"
+          python3 tools/verify_motion_acquisition_link.py "$ELF" --objdump "$OBJDUMP"
+          "$NM" "$ELF" | grep -q '__wrap_xTaskCreatePinnedToCore'
+          for sym in cam_start cam_stop cam_take; do "$NM" "$ELF" | grep -q " $sym$"; done
+          test -s madgwick-build-patch.json
+          test -s bmi270-build-patch.json
+          mkdir -p foot-observation/firmware
+          "$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-strings" "$ELF" | grep -F 'foot-control-observation-v1'
+          cp .pio/build/atoms3cam/{bootloader.bin,partitions.bin,firmware.bin} foot-observation/firmware/
+          cp "$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin" foot-observation/firmware/
+          git rev-parse HEAD > foot-observation/source-sha.txt
+          git diff --exit-code
+      - uses: actions/upload-artifact@v4
+        with:
+          name: foot-observation-build
+          path: foot-observation/
+          if-no-files-found: error
+          retention-days: 1
   build-site:
-    needs: [pages-ready, build-camera-diagnostics]
+    needs: [pages-ready, build-camera-diagnostics, build-foot-observation]
     if: needs.pages-ready.outputs.enabled == 'true'
     runs-on: ubuntu-24.04
     steps:
@@ -198,6 +250,17 @@ jobs:
             done
             python3 tools/verify_camera_pages.py --path "$d" --mode "$mode"
           done
+      - name: Retrieve pinned foot observation build
+        uses: actions/download-artifact@v4
+        with:
+          name: foot-observation-build
+          path: foot-observation-build
+      - name: Test, package and verify independent foot diagnostic
+        run: |
+          set -euxo pipefail
+          python3 tools/test_foot_observation_page.py
+          python3 tools/foot_observation_page.py --package --source foot-observation-build --stable _site/firmware --output _site/foot-observation
+          python3 tools/foot_observation_page.py --path _site/foot-observation
       - uses: actions/configure-pages@v5
         with:
           enablement: true
@@ -295,3 +358,7 @@ jobs:
           for mode in 0 1 2; do
             python3 tools/verify_camera_pages.py --url "${PAGE_URL%/}/camera/camera-mode-$mode/" --mode "$mode"
           done
+      - name: Verify published foot observation diagnostic
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: python3 tools/foot_observation_page.py --url "${PAGE_URL%/}/foot-observation/"
