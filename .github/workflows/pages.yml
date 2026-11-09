@@ -194,13 +194,13 @@ jobs:
     steps:
       - name: Fail closed unless a reviewed immutable trial SHA is pinned
         env:
-          TRIAL_SHA: "c0ee995bd17230df221b5fc0a92380356828a08f"
+          TRIAL_SHA: "a048c40d3307e3ce000ae9afc20d0b650b88d9eb"
         run: |
           [[ "$TRIAL_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "Early trial source SHA not set"; exit 1; }
           [[ "$TRIAL_SHA" != 0000000000000000000000000000000000000000 ]] || exit 1
       - uses: actions/checkout@v4
         with:
-          ref: c0ee995bd17230df221b5fc0a92380356828a08f
+          ref: a048c40d3307e3ce000ae9afc20d0b650b88d9eb
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
@@ -208,7 +208,7 @@ jobs:
       - name: Verify pinned source and host tests
         run: |
           set -euxo pipefail
-          test "$(git rev-parse HEAD)" = c0ee995bd17230df221b5fc0a92380356828a08f
+          test "$(git rev-parse HEAD)" = a048c40d3307e3ce000ae9afc20d0b650b88d9eb
           grep -q 'RUNTIME_DIAGNOSTIC_BUILD_ID "early-input-geometry-v1"' src/runtime_diagnostics.h
           bash tools/test_runtime.sh
       - name: Install PlatformIO

@@ -7,7 +7,7 @@ import shutil
 import urllib.request
 from pathlib import Path
 
-COMMIT = 'c0ee995bd17230df221b5fc0a92380356828a08f'
+COMMIT = 'a048c40d3307e3ce000ae9afc20d0b650b88d9eb'
 BUILD_ID = 'early-input-geometry-v1'
 PARTS = {'firmware/bootloader.bin': 0, 'firmware/partitions.bin': 32768,
          'firmware/boot_app0.bin': 57344, 'firmware/firmware.bin': 65536}
