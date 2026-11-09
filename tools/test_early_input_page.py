@@ -67,7 +67,7 @@ class Workflow(unittest.TestCase):
 
     def test_trial_env_and_linked_firmware_proofs(self):
         s=(Path(__file__).resolve().parents[1]/'.github/workflows/pages.yml').read_text(encoding='utf8')
-        job=s.split('  build-early-input-trial:',1)[1].split('  build-site:',1)[0]
+        job=s.split('  build-early-input-trial:',1)[1].split('  build-angle-early-trial:',1)[0]
         for text in ('[env:early_trial]', 'extends = env:atoms3cam',
                      '-DFOOT_EARLY_TRIAL=1', '-DFOOT_GEOMETRY_PROVISIONAL_EXPOSURE=1',
                      'FOOT_EARLY_TRIAL != 1', 'FOOT_GEOMETRY_PROVISIONAL_EXPOSURE != 1',
