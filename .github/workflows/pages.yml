@@ -293,13 +293,13 @@ jobs:
     steps:
       - name: Fail closed unless a reviewed immutable trial SHA is pinned
         env:
-          TRIAL_SHA: "52a18c74285cd1e2638c7e14ca6174c378525cdc"
+          TRIAL_SHA: "9939ff1da6550ac9de21451c92c1106edd8b374f"
         run: |
           [[ "$TRIAL_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "Early trial source SHA not set"; exit 1; }
           [[ "$TRIAL_SHA" != 0000000000000000000000000000000000000000 ]] || exit 1
       - uses: actions/checkout@v4
         with:
-          ref: 52a18c74285cd1e2638c7e14ca6174c378525cdc
+          ref: 9939ff1da6550ac9de21451c92c1106edd8b374f
           fetch-depth: 0
       # Keep the immutable trial checkout at root. The verifier belongs to
       # this pages revision and is checked out separately for this job.
@@ -314,7 +314,7 @@ jobs:
       - name: Verify pinned source and host tests
         run: |
           set -euxo pipefail
-          test "$(git rev-parse HEAD)" = 52a18c74285cd1e2638c7e14ca6174c378525cdc
+          test "$(git rev-parse HEAD)" = 9939ff1da6550ac9de21451c92c1106edd8b374f
           grep -q 'RUNTIME_DIAGNOSTIC_BUILD_ID "angle-early-eta-v1"' src/runtime_diagnostics.h
           bash tools/test_runtime.sh
       - name: Install PlatformIO and verify ELF checker

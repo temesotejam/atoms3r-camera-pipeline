@@ -7,7 +7,7 @@ import shutil
 import urllib.request
 from pathlib import Path
 
-COMMIT = '52a18c74285cd1e2638c7e14ca6174c378525cdc'
+COMMIT = '9939ff1da6550ac9de21451c92c1106edd8b374f'
 BUILD_ID = 'angle-early-eta-v1'
 PARTS = {'firmware/bootloader.bin': 0, 'firmware/partitions.bin': 32768,
          'firmware/boot_app0.bin': 57344, 'firmware/firmware.bin': 65536}
