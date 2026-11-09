@@ -202,6 +202,13 @@ jobs:
         with:
           ref: 9da024e95834cd6ede4f995de852db0a3136116c
           fetch-depth: 0
+      # Keep the immutable trial checkout at root. The verifier belongs to
+      # this pages revision and is checked out separately for this job.
+      - name: Checkout page proof verifier
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: page-proof
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -211,8 +218,10 @@ jobs:
           test "$(git rev-parse HEAD)" = 9da024e95834cd6ede4f995de852db0a3136116c
           grep -q 'RUNTIME_DIAGNOSTIC_BUILD_ID "early-input-geometry-v1"' src/runtime_diagnostics.h
           bash tools/test_runtime.sh
-      - name: Install PlatformIO
-        run: pip install platformio
+      - name: Install PlatformIO and verify ELF checker
+        run: |
+          pip install platformio pyelftools==0.33
+          python3 page-proof/tools/test_verify_early_flag_symbol.py
       - name: Build and verify experimental early-input firmware
         run: |
           set -euxo pipefail
@@ -260,7 +269,7 @@ jobs:
           grep -E ' [tTwW] .*ExperimentRunner::tryEarlyFootCandidate\(' early-trial-symbols.txt
           grep -E ' [tTwW] .*foot_geometry_worker::Async::entry\(' early-trial-symbols.txt
           grep -E ' [rRdD] early_trial_build_flag_proof$' early-trial-symbols.txt
-          "$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-strings" "$ELF" | grep -Fx 'early-trial-flags:1,1'
+          python3 page-proof/tools/verify_early_flag_symbol.py "$ELF"
           test -s madgwick-build-patch.json
           test -s bmi270-build-patch.json
           mkdir -p early-input-build/firmware
