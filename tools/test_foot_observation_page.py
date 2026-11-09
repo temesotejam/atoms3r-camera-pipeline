@@ -1,4 +1,5 @@
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -86,15 +87,60 @@ class PackagingTest(unittest.TestCase):
         self.assertNotEqual(first, page.COMMIT + '-' + other['firmware_sha256'] + '-' + other['bundle_sha256'])
 
 
+def verify_workflow_structure(workflow):
+    # Scope assertions to actual jobs, not similarly named text elsewhere.
+    def job(name):
+        pattern = (r'^  ' + re.escape(name) + r':\s*\n'
+                   r'(.*?)(?=^  [A-Za-z0-9_-]+:\s*$|\Z)')
+        matches = re.findall(pattern, workflow, re.MULTILINE | re.DOTALL)
+        if len(matches) != 1:
+            raise AssertionError('missing or duplicate job: ' + name)
+        return matches[0]
+
+    build = job('build-site')
+    needs = re.search(r'^    needs:\s*\[([^\]]+)\]\s*$', build, re.MULTILINE)
+    if not needs:
+        raise AssertionError('build-site dependency list missing')
+    dependencies = {x.strip() for x in needs.group(1).split(',')}
+    required = {'pages-ready', 'build-camera-diagnostics', 'build-foot-observation',
+                'build-early-input-trial'}
+    if not required.issubset(dependencies):
+        raise AssertionError('build-site must depend on every firmware package')
+
+    deploy = job('deploy')
+    if not re.search(r"^    if:\s*github\.event_name\s*!=\s*'pull_request'\s*$", deploy, re.MULTILINE):
+        raise AssertionError('deploy must skip pull requests')
+    if not re.search(r'^    needs:\s*build-site\s*$', deploy, re.MULTILINE):
+        raise AssertionError('deploy must depend on build-site')
+
+
 class WorkflowTest(unittest.TestCase):
-    def test_deployment_waits_for_all_three_packages_and_skips_pr(self):
-        workflow = (Path(__file__).resolve().parents[1] / '.github/workflows/pages.yml').read_text(encoding='utf8')
-        self.assertIn('needs: [pages-ready, build-camera-diagnostics, build-foot-observation]', workflow)
-        self.assertIn("if: github.event_name != 'pull_request'", workflow)
+    def setUp(self):
+        self.workflow = (Path(__file__).resolve().parents[1] / '.github/workflows/pages.yml').read_text(encoding='utf8')
+
+    def test_deployment_waits_for_all_packages_and_skips_pr(self):
+        workflow = self.workflow
+        verify_workflow_structure(workflow)
         self.assertIn('ref: ' + page.COMMIT, workflow)
         self.assertIn('--stable _site/firmware --output _site/foot-observation', workflow)
         self.assertIn('python3 tools/verify_camera_pages.py --path', workflow)
         self.assertIn('python3 tools/foot_observation_page.py --path', workflow)
+
+    def test_each_dependency_is_required(self):
+        for dependency in ('pages-ready', 'build-camera-diagnostics', 'build-foot-observation', 'build-early-input-trial'):
+            with self.subTest(dependency=dependency):
+                altered = self.workflow.replace(dependency + ']', 'missing]', 1).replace(dependency + ',', 'missing,', 1)
+                with self.assertRaises(AssertionError):
+                    verify_workflow_structure(altered)
+
+    def test_pr_skip_must_belong_to_deploy_job(self):
+        original = "    if: github.event_name != 'pull_request'"
+        self.assertIn(original, self.workflow)
+        altered = self.workflow.replace(original, "    if: github.event_name == 'pull_request'", 1)
+        # Text outside the deploy job cannot satisfy the check.
+        altered += "\n# " + original + "\n"
+        with self.assertRaises(AssertionError):
+            verify_workflow_structure(altered)
 
 
 if __name__ == '__main__':
