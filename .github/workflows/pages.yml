@@ -286,8 +286,111 @@ jobs:
           path: early-input-build/
           if-no-files-found: error
           retention-days: 1
+  build-angle-early-trial:
+    needs: pages-ready
+    if: needs.pages-ready.outputs.enabled == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Fail closed unless a reviewed immutable trial SHA is pinned
+        env:
+          TRIAL_SHA: "52a18c74285cd1e2638c7e14ca6174c378525cdc"
+        run: |
+          [[ "$TRIAL_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "Early trial source SHA not set"; exit 1; }
+          [[ "$TRIAL_SHA" != 0000000000000000000000000000000000000000 ]] || exit 1
+      - uses: actions/checkout@v4
+        with:
+          ref: 52a18c74285cd1e2638c7e14ca6174c378525cdc
+          fetch-depth: 0
+      # Keep the immutable trial checkout at root. The verifier belongs to
+      # this pages revision and is checked out separately for this job.
+      - name: Checkout page proof verifier
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: page-proof
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify pinned source and host tests
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = 52a18c74285cd1e2638c7e14ca6174c378525cdc
+          grep -q 'RUNTIME_DIAGNOSTIC_BUILD_ID "angle-early-eta-v1"' src/runtime_diagnostics.h
+          bash tools/test_runtime.sh
+      - name: Install PlatformIO and verify ELF checker
+        run: |
+          pip install platformio pyelftools==0.33
+          python3 page-proof/tools/test_verify_angle_flag_symbol.py
+      - name: Build and verify experimental angle-early firmware
+        run: |
+          set -euxo pipefail
+          # Only this job uses these flags. The forced header checks every C/C++ TU.
+          cat >> platformio.ini <<'EOF'
+
+          [env:angle_trial]
+          extends = env:atoms3cam
+          build_flags =
+            ${env:atoms3cam.build_flags}
+            -DFOOT_EARLY_TRIAL=1
+            -DANGLE_EARLY_TRIAL=1
+            -DFOOT_GEOMETRY_PROVISIONAL_EXPOSURE=0
+            -include $PROJECT_DIR/angle_trial_flags.h
+            -Wl,--undefined=angle_trial_build_flag_proof
+          EOF
+          cat > angle_trial_flags.h <<'EOF'
+          #if !defined(FOOT_EARLY_TRIAL) || FOOT_EARLY_TRIAL != 1
+          #error angle trial flag must equal 1
+          #endif
+          #if !defined(ANGLE_EARLY_TRIAL) || ANGLE_EARLY_TRIAL != 1
+          #error angle trial flag must equal 1
+          #endif
+          #if !defined(FOOT_GEOMETRY_PROVISIONAL_EXPOSURE) || FOOT_GEOMETRY_PROVISIONAL_EXPOSURE != 0
+          #error provisional geometry exposure flag must equal 0
+          #endif
+          EOF
+          cat > src/angle_trial_build_proof.cpp <<'EOF'
+          extern "C" const char angle_trial_build_flag_proof[] = "angle-trial-flags:1,1,0";
+          EOF
+          pio pkg install -e angle_trial
+          python3 tools/verify_madgwick_dependency.py --library '.pio/libdeps/angle_trial/Adafruit AHRS'
+          pio run -e angle_trial
+          python3 tools/verify_madgwick_dependency.py --library '.pio/libdeps/angle_trial/Adafruit AHRS'
+          ELF=.pio/build/angle_trial/firmware.elf
+          OBJDUMP="$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-objdump"
+          NM="$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-nm"
+          python3 tools/verify_camera_task_link.py "$ELF" --objdump "$OBJDUMP"
+          python3 tools/verify_log_encoder_link.py "$ELF" --nm "$NM"
+          python3 tools/verify_realtime_code_link.py "$ELF" --objdump "$OBJDUMP"
+          python3 tools/verify_imu_transport_link.py "$ELF" --nm "$NM"
+          python3 tools/verify_core_isolation_link.py "$ELF" --objdump "$OBJDUMP"
+          python3 tools/verify_motion_acquisition_link.py "$ELF" --objdump "$OBJDUMP"
+          "$NM" "$ELF" | grep -q '__wrap_xTaskCreatePinnedToCore'
+          for sym in cam_start cam_stop cam_take; do "$NM" "$ELF" | grep -q " $sym$"; done
+          # Verify both angle candidate functions exist and geometry task is absent.
+          "$NM" -C "$ELF" > angle-trial-symbols.txt
+          grep -E ' [tTwW] .*ExperimentRunner::tryAngleEarlyCandidate\(' angle-trial-symbols.txt
+          grep -E ' [tTwW] .*ExperimentRunner::decideAngleEarlyCandidate\(' angle-trial-symbols.txt
+          if grep -E ' [tTwW] .*foot_geometry_worker::Async::entry\(' angle-trial-symbols.txt; then echo 'geometry worker must be absent'; exit 1; fi
+          grep -E ' [rRdD] angle_trial_build_flag_proof$' angle-trial-symbols.txt
+          python3 page-proof/tools/verify_angle_flag_symbol.py "$ELF"
+          test -s madgwick-build-patch.json
+          test -s bmi270-build-patch.json
+          mkdir -p angle-early-build/firmware
+          "$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-strings" "$ELF" | grep -F 'angle-early-eta-v1'
+          cp .pio/build/angle_trial/{bootloader.bin,partitions.bin,firmware.bin} angle-early-build/firmware/
+          cp "$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin" angle-early-build/firmware/
+          git rev-parse HEAD > angle-early-build/source-sha.txt
+          rm angle_trial_flags.h src/angle_trial_build_proof.cpp angle-trial-symbols.txt
+          git checkout -- platformio.ini
+          git diff --exit-code
+      - uses: actions/upload-artifact@v4
+        with:
+          name: angle-early-build
+          path: angle-early-build/
+          if-no-files-found: error
+          retention-days: 1
   build-site:
-    needs: [pages-ready, build-camera-diagnostics, build-foot-observation, build-early-input-trial]
+    needs: [pages-ready, build-camera-diagnostics, build-foot-observation, build-early-input-trial, build-angle-early-trial]
     if: needs.pages-ready.outputs.enabled == 'true'
     runs-on: ubuntu-24.04
     steps:
@@ -371,6 +474,16 @@ jobs:
           python3 tools/test_early_input_page.py
           python3 tools/early_input_page.py --package --source early-input-build --stable _site/firmware --output _site/early-input
           python3 tools/early_input_page.py --path _site/early-input
+      - uses: actions/download-artifact@v4
+        with:
+          name: angle-early-build
+          path: angle-early-build
+      - name: Test, package and verify angle-early trial
+        run: |
+          set -euxo pipefail
+          python3 tools/test_angle_early_page.py
+          python3 tools/angle_early_page.py --package --source angle-early-build --stable _site/firmware --output _site/angle-early
+          python3 tools/angle_early_page.py --path _site/angle-early
       - uses: actions/configure-pages@v5
         with:
           enablement: true
@@ -476,3 +589,7 @@ jobs:
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
         run: python3 tools/early_input_page.py --url "${PAGE_URL%/}/early-input/"
+      - name: Verify published angle-early trial
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: python3 tools/angle_early_page.py --url "${PAGE_URL%/}/angle-early/"

@@ -103,7 +103,7 @@ def verify_workflow_structure(workflow):
         raise AssertionError('build-site dependency list missing')
     dependencies = {x.strip() for x in needs.group(1).split(',')}
     required = {'pages-ready', 'build-camera-diagnostics', 'build-foot-observation',
-                'build-early-input-trial'}
+                'build-early-input-trial', 'build-angle-early-trial'}
     if not required.issubset(dependencies):
         raise AssertionError('build-site must depend on every firmware package')
 
@@ -127,7 +127,7 @@ class WorkflowTest(unittest.TestCase):
         self.assertIn('python3 tools/foot_observation_page.py --path', workflow)
 
     def test_each_dependency_is_required(self):
-        for dependency in ('pages-ready', 'build-camera-diagnostics', 'build-foot-observation', 'build-early-input-trial'):
+        for dependency in ('pages-ready', 'build-camera-diagnostics', 'build-foot-observation', 'build-early-input-trial', 'build-angle-early-trial'):
             with self.subTest(dependency=dependency):
                 altered = self.workflow.replace(dependency + ']', 'missing]', 1).replace(dependency + ',', 'missing,', 1)
                 with self.assertRaises(AssertionError):
