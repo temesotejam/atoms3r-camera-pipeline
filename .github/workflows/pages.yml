@@ -187,8 +187,98 @@ jobs:
           path: foot-observation/
           if-no-files-found: error
           retention-days: 1
+  build-early-input-trial:
+    needs: pages-ready
+    if: needs.pages-ready.outputs.enabled == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Fail closed unless a reviewed immutable trial SHA is pinned
+        env:
+          TRIAL_SHA: "b4fb7dde9e0a54a4681dc820b3c4fe6d0cf24d7d"
+        run: |
+          [[ "$TRIAL_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "Early trial source SHA not set"; exit 1; }
+          [[ "$TRIAL_SHA" != 0000000000000000000000000000000000000000 ]] || exit 1
+      - uses: actions/checkout@v4
+        with:
+          ref: b4fb7dde9e0a54a4681dc820b3c4fe6d0cf24d7d
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify pinned source and host tests
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = b4fb7dde9e0a54a4681dc820b3c4fe6d0cf24d7d
+          grep -q 'RUNTIME_DIAGNOSTIC_BUILD_ID "early-input-geometry-v1"' src/runtime_diagnostics.h
+          bash tools/test_runtime.sh
+      - name: Install PlatformIO
+        run: pip install platformio
+      - name: Build and verify experimental early-input firmware
+        run: |
+          set -euxo pipefail
+          # Only this job uses these flags. The forced header checks every C/C++ TU.
+          cat >> platformio.ini <<'EOF'
+
+          [env:early_trial]
+          extends = env:atoms3cam
+          build_flags =
+            ${env:atoms3cam.build_flags}
+            -DFOOT_EARLY_TRIAL=1
+            -DFOOT_GEOMETRY_PROVISIONAL_EXPOSURE=1
+            -include $PROJECT_DIR/early_trial_flags.h
+            -Wl,--undefined=early_trial_build_flag_proof
+          EOF
+          cat > early_trial_flags.h <<'EOF'
+          #if !defined(FOOT_EARLY_TRIAL) || FOOT_EARLY_TRIAL != 1
+          #error early trial flag must equal 1
+          #endif
+          #if !defined(FOOT_GEOMETRY_PROVISIONAL_EXPOSURE) || FOOT_GEOMETRY_PROVISIONAL_EXPOSURE != 1
+          #error provisional geometry exposure flag must equal 1
+          #endif
+          EOF
+          cat > src/early_trial_build_proof.cpp <<'EOF'
+          extern "C" const char early_trial_build_flag_proof[] = "early-trial-flags:1,1";
+          EOF
+          pio pkg install -e early_trial
+          python3 tools/verify_madgwick_dependency.py --library '.pio/libdeps/early_trial/Adafruit AHRS'
+          pio run -e early_trial
+          python3 tools/verify_madgwick_dependency.py --library '.pio/libdeps/early_trial/Adafruit AHRS'
+          ELF=.pio/build/early_trial/firmware.elf
+          OBJDUMP="$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-objdump"
+          NM="$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-nm"
+          python3 tools/verify_camera_task_link.py "$ELF" --objdump "$OBJDUMP"
+          python3 tools/verify_log_encoder_link.py "$ELF" --nm "$NM"
+          python3 tools/verify_realtime_code_link.py "$ELF" --objdump "$OBJDUMP"
+          python3 tools/verify_imu_transport_link.py "$ELF" --nm "$NM"
+          python3 tools/verify_core_isolation_link.py "$ELF" --objdump "$OBJDUMP"
+          python3 tools/verify_motion_acquisition_link.py "$ELF" --objdump "$OBJDUMP"
+          "$NM" "$ELF" | grep -q '__wrap_xTaskCreatePinnedToCore'
+          for sym in cam_start cam_stop cam_take; do "$NM" "$ELF" | grep -q " $sym$"; done
+          # Both control candidate and the FreeRTOS geometry task must exist in
+          # the actual linked firmware; the worker loop may inline into entry.
+          "$NM" -C "$ELF" > early-trial-symbols.txt
+          grep -E ' [tTwW] .*ExperimentRunner::tryEarlyFootCandidate\(' early-trial-symbols.txt
+          grep -E ' [tTwW] .*foot_geometry_worker::Async::entry\(' early-trial-symbols.txt
+          grep -E ' [rRdD] early_trial_build_flag_proof$' early-trial-symbols.txt
+          "$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-strings" "$ELF" | grep -Fx 'early-trial-flags:1,1'
+          test -s madgwick-build-patch.json
+          test -s bmi270-build-patch.json
+          mkdir -p early-input-build/firmware
+          "$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-strings" "$ELF" | grep -F 'early-input-geometry-v1'
+          cp .pio/build/early_trial/{bootloader.bin,partitions.bin,firmware.bin} early-input-build/firmware/
+          cp "$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin" early-input-build/firmware/
+          git rev-parse HEAD > early-input-build/source-sha.txt
+          rm early_trial_flags.h src/early_trial_build_proof.cpp early-trial-symbols.txt
+          git checkout -- platformio.ini
+          git diff --exit-code
+      - uses: actions/upload-artifact@v4
+        with:
+          name: early-input-build
+          path: early-input-build/
+          if-no-files-found: error
+          retention-days: 1
   build-site:
-    needs: [pages-ready, build-camera-diagnostics, build-foot-observation]
+    needs: [pages-ready, build-camera-diagnostics, build-foot-observation, build-early-input-trial]
     if: needs.pages-ready.outputs.enabled == 'true'
     runs-on: ubuntu-24.04
     steps:
@@ -261,6 +351,17 @@ jobs:
           python3 tools/test_foot_observation_page.py
           python3 tools/foot_observation_page.py --package --source foot-observation-build --stable _site/firmware --output _site/foot-observation
           python3 tools/foot_observation_page.py --path _site/foot-observation
+      - name: Download pinned early-input experimental firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: early-input-build
+          path: early-input-build
+      - name: Test, package and verify early-input trial
+        run: |
+          set -euxo pipefail
+          python3 tools/test_early_input_page.py
+          python3 tools/early_input_page.py --package --source early-input-build --stable _site/firmware --output _site/early-input
+          python3 tools/early_input_page.py --path _site/early-input
       - uses: actions/configure-pages@v5
         with:
           enablement: true
@@ -362,3 +463,7 @@ jobs:
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
         run: python3 tools/foot_observation_page.py --url "${PAGE_URL%/}/foot-observation/"
+      - name: Verify published early-input trial
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: python3 tools/early_input_page.py --url "${PAGE_URL%/}/early-input/"
