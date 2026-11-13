@@ -13,8 +13,7 @@ jobs:
   import:
     runs-on: ubuntu-24.04
     steps:
-      - name: Check out the isolated development branch
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: work/latency-investigation
           fetch-depth: 0
@@ -24,45 +23,44 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Fetch the complete production Git history
+      - name: Fetch exact production baseline and ancestry
         run: |
           git fetch --no-tags https://github.com/temesotejam/atoms3r-lateral-energy-control.git ec5faa49766187cb552523d8c234f6a6bba61224
           test "$(git rev-parse FETCH_HEAD)" = "ec5faa49766187cb552523d8c234f6a6bba61224"
 
-      - name: Merge the production source tree without changing its behavior
+      - name: Merge source while excluding upstream GitHub workflows
         run: |
           mkdir -p docs
           git show FETCH_HEAD:README.md > docs/UPSTREAM_README.md
           git merge --allow-unrelated-histories --no-commit -X ours FETCH_HEAD
+          # This repository uses its own minimal CI/Pages workflows. Do not
+          # import upstream workflows: the GitHub App token is not granted
+          # workflow-file write permission, and production workflows target
+          # the original repository's deployment environment.
+          git rm -r --ignore-unmatch .github/workflows/build.yml .github/workflows/pages.yml
           cat > docs/UPSTREAM_BASELINE.md <<'EOF'
           # Imported production baseline
 
           Source repository: https://github.com/temesotejam/atoms3r-lateral-energy-control
           Source commit: ec5faa49766187cb552523d8c234f6a6bba61224
-          Source branch at import: main
           Import date: 2026-11-13
 
-          The production commit and its complete Git ancestry are merged into
-          this isolated repository. The camera pipeline work must preserve all
-          non-camera control, estimator, IMU, motor, and logging behavior.
-          This imported commit is the reference for subsequent diffs.
+          Complete source tree and Git ancestry imported. Upstream GitHub Actions
+          workflows are intentionally excluded; this repository has independent
+          CI and Pages workflows. Non-camera runtime behavior is the invariant.
           EOF
           git add -A
 
-      - name: Run existing host regression suite
+      - name: Run original host regression suite
         run: bash tools/test_runtime.sh
 
-      - name: Build the ESP32-S3 firmware
+      - name: Build original ESP32-S3 firmware
         run: |
           python3 -m pip install --user platformio
           export PATH="$HOME/.local/bin:$PATH"
           pio run
 
-      - name: Commit imported baseline to the isolated branch
+      - name: Commit baseline to isolated branch
         run: |
-          if git diff --cached --quiet; then
-            echo "No baseline changes to import."
-            exit 0
-          fi
-          git commit -m "Merge production baseline ec5faa4 with full upstream history"
+          git commit -m "Merge production baseline ec5faa4; preserve runtime unchanged"
           git push origin HEAD:work/latency-investigation
