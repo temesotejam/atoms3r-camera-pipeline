@@ -1,0 +1,42 @@
+<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ホイールが機体に与えた仕事</title>
+<style>body{font:16px system-ui;max-width:960px;margin:36px auto;padding:0 20px;color:#203048}p{line-height:1.7}input,select,button{font:inherit;padding:9px;margin:6px}pre{white-space:pre-wrap;background:#f1f5f9;padding:20px;line-height:1.6}a{color:#174b8e}</style>
+<h1>ホイールが機体に与えた仕事</h1>
+<p>1.0.10以降のRWLOG v56は、ホイールの位置変化から求めた速度と、同じ時刻の機体角速度を使って仕事を計算します。ファイルはブラウザ内で処理します。位置が欠測した区間を、速度読み値で補うことはしません。</p>
+<p>慣性はモータの回転部分を含む暫定値です。軸の符号は、機体の正方向（IMUの+gy）に対する生の正回転の向きです。位置は5点の近似から速度へ換算するため、短い入力の境界付近には近似幅の影響があります。空気抵抗は補正していません。計算した仕事は、次のピークに残るエネルギーとは異なります。</p>
+<p>1.0.9のRWLOG v55も参考値として読めますが、速度読み値の遅れがあるため、入力中と入力後の配分を結論には使えません。</p>
+<p><label>RWLOG <input id="file" type="file" accept=".rwlog"></label></p>
+<p><label>慣性モーメント［kg·m²］ <input id="inertia" type="number" value="0.000028" min="0.000000001" step="any"></label>
+<label>生の正回転と機体の正方向 <select id="sign"><option value="-1">逆向き（暫定）</option><option value="1">同じ向き</option></select></label></p>
+<button id="calculate">計算する</button><button id="pulses" disabled>入力別CSVを保存</button><button id="intervals" disabled>全区間CSVを保存</button><button id="kinematics" disabled>位置由来の速度CSVを保存</button><button id="json" disabled>結果JSONを保存</button>
+<pre id="result" role="status">ファイルを選んでください。</pre>
+<h2>一つ先の負側ピークを予測して照合</h2>
+<p>固定脚・負側5条件の一括実験専用です。新しい直立基準で測った14回・304件から決めた式を使い、ZEROクロス時点に記録済みの角速度・ホイール回転数・直前ピーク・電池電圧と割当時間だけで予測します。CSVには候補の0・10・15・20・25 msから目標エネルギーに最も近い入力時間と、その予測誤差を記録します。候補範囲で目標に届かない場合も表示します。次のピークは答え合わせにのみ使用します。元の5回は直立基準が異なるため、この式の検証範囲には含めません。学習範囲外の予測にはCSVで理由を付けます。上の慣性・符号の入力欄を変えても、この予測式の係数は変わりません。この計算は実機の制御を変更しません。</p>
+<button id="one-peak-csv" disabled>予測と実測のCSVを保存</button>
+<pre id="one-peak-result" role="status">一括実験のRWLOGを選んで「計算する」を押してください。</pre>
+<p>正の仕事は機体への加振、負の仕事は制動を表します。欠測区間をゼロとして補いません。入力の境界では前後の回転速度から線形補間します。</p>
+<p><a href="index.html">書き込みページに戻る</a></p>
+<script src="wheel-work.js"></script><script src="one-peak-energy.js"></script><script>
+'use strict';
+const get=id=>document.getElementById(id); let report=null, predictionReport=null, name='wheel_work';
+function save(contents,suffix,type){const url=URL.createObjectURL(new Blob([contents],{type})),a=document.createElement('a');a.href=url;a.download=name+suffix;a.click();setTimeout(()=>URL.revokeObjectURL(url),3000);}
+get('calculate').onclick=async()=>{
+  report=null;predictionReport=null;for(const id of ['pulses','intervals','kinematics','json','one-peak-csv'])get(id).disabled=true;
+  get('one-peak-result').textContent='RWLOGを確認中です。';
+  try{const f=get('file').files[0];if(!f)throw Error('RWLOGを選んでください。');
+    name=f.name.replace(/\.rwlog$/i,'');
+    const parsed=WheelWorkAnalyzer.parse(new Uint8Array(await f.arrayBuffer()));
+    report=WheelWorkAnalyzer.analyze(parsed.rows,parsed.metadata,{inertia:Number(get('inertia').value),sign:Number(get('sign').value)});
+    get('result').textContent=f.name+'\n'+WheelWorkAnalyzer.describe(report);
+    for(const id of ['pulses','intervals','kinematics','json'])get(id).disabled=false;
+    try {
+      predictionReport=OnePeakEnergy.analyze(parsed.metadata);
+      get('one-peak-result').textContent=OnePeakEnergy.describe(predictionReport);
+      get('one-peak-csv').disabled=false;
+    } catch(e) {get('one-peak-result').textContent=e.message;}
+  }catch(e){get('result').textContent=e.message;get('one-peak-result').textContent='RWLOGを確認できなかったため、予測は行っていません。';}
+};
+for(const id of ['pulses','intervals','kinematics'])get(id).onclick=()=>{if(report)save('\ufeff'+WheelWorkAnalyzer.csv(report[id],report),'_wheel_work_'+id+'.csv','text/csv;charset=utf-8');};
+get('json').onclick=()=>{if(report)save(JSON.stringify(report,null,2),'_wheel_work.json','application/json');};
+get('one-peak-csv').onclick=()=>{if(predictionReport)save('\ufeff'+WheelWorkAnalyzer.csv(predictionReport.rows),'_one_peak_prediction.csv','text/csv;charset=utf-8');};
+</script></html>

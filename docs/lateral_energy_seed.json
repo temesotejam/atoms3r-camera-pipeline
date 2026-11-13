@@ -1,0 +1,40 @@
+{
+  "revision": "fixed_foot_energy_seed_20261013",
+  "status": "provisional_closed_loop_seed_not_causal_identification",
+  "source": "inherited_fixed_foot_20260929_204_events;predicted_Q_not_measured_current_integral",
+  "geometry": {
+    "mass_kg": 0.1997,
+    "gravity_m_s2": 9.80665,
+    "cg_height_m": 0.12,
+    "radius_m": 0.15,
+    "inner_edge_m": 0.005
+  },
+  "sides": [
+    {
+      "side": 1,
+      "count": 103,
+      "free_offset_j": -0.0002019364753,
+      "free_omega2_j_per_rad2_s2": 0.0006085534387,
+      "work_omega_q_j_per_rad_s_A_s": 0.0269250779,
+      "work_q2_j_per_A2_s2": 0.5522071518,
+      "endpoint_energy_rmse_j": 5.735911692e-05,
+      "rate_support_min_dps": 17.9508,
+      "rate_support_max_dps": 92.2064,
+      "charge_support_min_mA_s": 0.0,
+      "charge_support_max_mA_s": 13.27138
+    },
+    {
+      "side": -1,
+      "count": 101,
+      "free_offset_j": -0.0002180822115,
+      "free_omega2_j_per_rad2_s2": 0.0007149309376,
+      "work_omega_q_j_per_rad_s_A_s": 0.0388967425,
+      "work_q2_j_per_A2_s2": 0.2578004825,
+      "endpoint_energy_rmse_j": 5.92848882e-05,
+      "rate_support_min_dps": 35.7375,
+      "rate_support_max_dps": 91.4938,
+      "charge_support_min_mA_s": 0.0,
+      "charge_support_max_mA_s": 12.83679
+    }
+  ]
+}

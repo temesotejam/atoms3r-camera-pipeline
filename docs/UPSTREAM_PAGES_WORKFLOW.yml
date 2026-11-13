@@ -1,0 +1,595 @@
+name: pages
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  pull_request:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'live' }}
+  cancel-in-progress: true
+jobs:
+  pages-ready:
+    runs-on: ubuntu-24.04
+    outputs:
+      enabled: ${{ steps.detect.outputs.enabled }}
+    steps:
+      - id: detect
+        name: Check whether GitHub Pages is enabled
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import os, urllib.error, urllib.request
+          url = 'https://api.github.com/repos/' + os.environ['GH_REPO'] + '/pages'
+          request = urllib.request.Request(url, headers={
+              'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+              'Accept': 'application/vnd.github+json'})
+          try:
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  enabled = response.status == 200
+          except urllib.error.HTTPError as error:
+              if error.code != 404:
+                  raise
+              enabled = False
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('enabled=' + str(enabled).lower() + '\n')
+          print('GitHub Pages is enabled' if enabled else
+                'GitHub Pages is not enabled; site deployment will wait for repository setup')
+          PY
+  build-camera-diagnostics:
+    needs: pages-ready
+    if: needs.pages-ready.outputs.enabled == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [0, 1, 2]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 2fdac86a87f529cffbe2219dfaaf07318b0575c7
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify existing host tests
+        run: |
+          bash tools/test_runtime.sh
+          python3 tools/test_prepare_camera_compare_package.py
+      - name: Install PlatformIO
+        run: pip install platformio
+      - name: Build selected ESP32-S3 mode
+        env:
+          MODE: ${{ matrix.mode }}
+          HEAD_SHA: 2fdac86a87f529cffbe2219dfaaf07318b0575c7
+        run: |
+          set -euxo pipefail
+          cat >> platformio.ini <<'EOF'
+
+          [env:camera_compare]
+          extends = env:atoms3cam
+          build_flags =
+            ${env:atoms3cam.build_flags}
+          EOF
+          printf '  -DFOOT_FAST_CAPTURE_EXPERIMENT=%s\n' "$MODE" >> platformio.ini
+          printf '%s\n' '  -DCAMERA_DIAGNOSTIC_ONLY=1' >> platformio.ini
+          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+          for i in 0 1 2 3 4; do
+            printf '  -DCAMERA_BUILD_SHA_%s=0x%sUL\n' "$i" "${HEAD_SHA:$((i*8)):8}" >> platformio.ini
+          done
+          pio pkg install -e camera_compare
+          python3 tools/verify_madgwick_dependency.py --library '.pio/libdeps/camera_compare/Adafruit AHRS'
+          pio run -e camera_compare
+          python3 tools/verify_madgwick_dependency.py --library '.pio/libdeps/camera_compare/Adafruit AHRS'
+          ELF=.pio/build/camera_compare/firmware.elf
+          OBJDUMP="$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-objdump"
+          NM="$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-nm"
+          python3 tools/verify_camera_task_link.py "$ELF" --objdump "$OBJDUMP"
+          python3 tools/verify_log_encoder_link.py "$ELF" --nm "$NM"
+          python3 tools/verify_realtime_code_link.py "$ELF" --objdump "$OBJDUMP"
+          python3 tools/verify_imu_transport_link.py "$ELF" --nm "$NM"
+          python3 tools/verify_core_isolation_link.py "$ELF" --objdump "$OBJDUMP"
+          python3 tools/verify_motion_acquisition_link.py "$ELF" --objdump "$OBJDUMP"
+          "$NM" "$ELF" | grep -q '__wrap_xTaskCreatePinnedToCore'
+          for sym in cam_start cam_stop cam_take; do "$NM" "$ELF" | grep -q " $sym$"; done
+          test -s madgwick-build-patch.json
+          test -s bmi270-build-patch.json
+      - name: Package identified Web Serial flasher
+        env:
+          MODE: ${{ matrix.mode }}
+          HEAD_SHA: 2fdac86a87f529cffbe2219dfaaf07318b0575c7
+        run: |
+          set -euxo pipefail
+          mkdir -p camera-artifact/firmware
+          cp .pio/build/camera_compare/{bootloader.bin,partitions.bin,firmware.bin} camera-artifact/firmware/
+          cp "$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin" camera-artifact/firmware/
+          cp bmi270-build-patch.json madgwick-build-patch.json camera-artifact/
+          python3 tools/prepare_camera_compare_package.py --mode "$MODE" --commit "$HEAD_SHA" --checkout-commit "$(git rev-parse HEAD)" --output camera-artifact
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('camera-artifact')
+          manifest_path = root / 'manifest.json'
+          manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+          manifest['new_install_prompt_erase'] = True
+          manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          html_path = root / 'index.html'
+          html = html_path.read_text(encoding='utf-8')
+          needle = '<script type="module" src="https://unpkg.com/esp-web-tools@10.1.1/'
+          assert html.count(needle) == 1
+          html = html.replace(needle, '<script src="../../flasher-completion.js?v=20261103"></script>\n' + needle)
+          notice = '<p><strong>消去の確認が表示された場合、「Erase device」にチェックを入れないでください。</strong></p>'
+          assert '</body></html>' in html
+          html_path.write_text(html.replace('</body></html>', notice + '</body></html>'), encoding='utf-8')
+          PY
+          git checkout -- platformio.ini
+          git diff --exit-code
+      - uses: actions/upload-artifact@v4
+        with:
+          name: camera-mode-${{ matrix.mode }}
+          path: camera-artifact/
+          if-no-files-found: error
+          retention-days: 30
+  build-foot-observation:
+    needs: pages-ready
+    if: needs.pages-ready.outputs.enabled == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: a50c80e3f9c697ad2767b356dfd1a2a96c8d4f1d
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify pinned source and host tests
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = a50c80e3f9c697ad2767b356dfd1a2a96c8d4f1d
+          grep -q 'RUNTIME_DIAGNOSTIC_BUILD_ID "foot-control-observation-v1"' src/runtime_diagnostics.h
+          bash tools/test_runtime.sh
+      - name: Install PlatformIO
+        run: pip install platformio
+      - name: Build and verify diagnostic firmware
+        run: |
+          set -euxo pipefail
+          pio pkg install -e atoms3cam
+          python3 tools/verify_madgwick_dependency.py --library '.pio/libdeps/atoms3cam/Adafruit AHRS'
+          pio run -e atoms3cam
+          python3 tools/verify_madgwick_dependency.py --library '.pio/libdeps/atoms3cam/Adafruit AHRS'
+          ELF=.pio/build/atoms3cam/firmware.elf
+          OBJDUMP="$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-objdump"
+          NM="$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-nm"
+          python3 tools/verify_camera_task_link.py "$ELF" --objdump "$OBJDUMP"
+          python3 tools/verify_log_encoder_link.py "$ELF" --nm "$NM"
+          python3 tools/verify_realtime_code_link.py "$ELF" --objdump "$OBJDUMP"
+          python3 tools/verify_imu_transport_link.py "$ELF" --nm "$NM"
+          python3 tools/verify_core_isolation_link.py "$ELF" --objdump "$OBJDUMP"
+          python3 tools/verify_motion_acquisition_link.py "$ELF" --objdump "$OBJDUMP"
+          "$NM" "$ELF" | grep -q '__wrap_xTaskCreatePinnedToCore'
+          for sym in cam_start cam_stop cam_take; do "$NM" "$ELF" | grep -q " $sym$"; done
+          test -s madgwick-build-patch.json
+          test -s bmi270-build-patch.json
+          mkdir -p foot-observation/firmware
+          "$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-strings" "$ELF" | grep -F 'foot-control-observation-v1'
+          cp .pio/build/atoms3cam/{bootloader.bin,partitions.bin,firmware.bin} foot-observation/firmware/
+          cp "$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin" foot-observation/firmware/
+          git rev-parse HEAD > foot-observation/source-sha.txt
+          git diff --exit-code
+      - uses: actions/upload-artifact@v4
+        with:
+          name: foot-observation-build
+          path: foot-observation/
+          if-no-files-found: error
+          retention-days: 1
+  build-early-input-trial:
+    needs: pages-ready
+    if: needs.pages-ready.outputs.enabled == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Fail closed unless a reviewed immutable trial SHA is pinned
+        env:
+          TRIAL_SHA: "9da024e95834cd6ede4f995de852db0a3136116c"
+        run: |
+          [[ "$TRIAL_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "Early trial source SHA not set"; exit 1; }
+          [[ "$TRIAL_SHA" != 0000000000000000000000000000000000000000 ]] || exit 1
+      - uses: actions/checkout@v4
+        with:
+          ref: 9da024e95834cd6ede4f995de852db0a3136116c
+          fetch-depth: 0
+      # Keep the immutable trial checkout at root. The verifier belongs to
+      # this pages revision and is checked out separately for this job.
+      - name: Checkout page proof verifier
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: page-proof
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify pinned source and host tests
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = 9da024e95834cd6ede4f995de852db0a3136116c
+          grep -q 'RUNTIME_DIAGNOSTIC_BUILD_ID "early-input-geometry-v1"' src/runtime_diagnostics.h
+          bash tools/test_runtime.sh
+      - name: Install PlatformIO and verify ELF checker
+        run: |
+          pip install platformio pyelftools==0.33
+          python3 page-proof/tools/test_verify_early_flag_symbol.py
+      - name: Build and verify experimental early-input firmware
+        run: |
+          set -euxo pipefail
+          # Only this job uses these flags. The forced header checks every C/C++ TU.
+          cat >> platformio.ini <<'EOF'
+
+          [env:early_trial]
+          extends = env:atoms3cam
+          build_flags =
+            ${env:atoms3cam.build_flags}
+            -DFOOT_EARLY_TRIAL=1
+            -DFOOT_GEOMETRY_PROVISIONAL_EXPOSURE=1
+            -include $PROJECT_DIR/early_trial_flags.h
+            -Wl,--undefined=early_trial_build_flag_proof
+          EOF
+          cat > early_trial_flags.h <<'EOF'
+          #if !defined(FOOT_EARLY_TRIAL) || FOOT_EARLY_TRIAL != 1
+          #error early trial flag must equal 1
+          #endif
+          #if !defined(FOOT_GEOMETRY_PROVISIONAL_EXPOSURE) || FOOT_GEOMETRY_PROVISIONAL_EXPOSURE != 1
+          #error provisional geometry exposure flag must equal 1
+          #endif
+          EOF
+          cat > src/early_trial_build_proof.cpp <<'EOF'
+          extern "C" const char early_trial_build_flag_proof[] = "early-trial-flags:1,1";
+          EOF
+          pio pkg install -e early_trial
+          python3 tools/verify_madgwick_dependency.py --library '.pio/libdeps/early_trial/Adafruit AHRS'
+          pio run -e early_trial
+          python3 tools/verify_madgwick_dependency.py --library '.pio/libdeps/early_trial/Adafruit AHRS'
+          ELF=.pio/build/early_trial/firmware.elf
+          OBJDUMP="$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-objdump"
+          NM="$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-nm"
+          python3 tools/verify_camera_task_link.py "$ELF" --objdump "$OBJDUMP"
+          python3 tools/verify_log_encoder_link.py "$ELF" --nm "$NM"
+          python3 tools/verify_realtime_code_link.py "$ELF" --objdump "$OBJDUMP"
+          python3 tools/verify_imu_transport_link.py "$ELF" --nm "$NM"
+          python3 tools/verify_core_isolation_link.py "$ELF" --objdump "$OBJDUMP"
+          python3 tools/verify_motion_acquisition_link.py "$ELF" --objdump "$OBJDUMP"
+          "$NM" "$ELF" | grep -q '__wrap_xTaskCreatePinnedToCore'
+          for sym in cam_start cam_stop cam_take; do "$NM" "$ELF" | grep -q " $sym$"; done
+          # Both control candidate and the FreeRTOS geometry task must exist in
+          # the actual linked firmware; the worker loop may inline into entry.
+          "$NM" -C "$ELF" > early-trial-symbols.txt
+          grep -E ' [tTwW] .*ExperimentRunner::tryEarlyFootCandidate\(' early-trial-symbols.txt
+          grep -E ' [tTwW] .*foot_geometry_worker::Async::entry\(' early-trial-symbols.txt
+          grep -E ' [rRdD] early_trial_build_flag_proof$' early-trial-symbols.txt
+          python3 page-proof/tools/verify_early_flag_symbol.py "$ELF"
+          test -s madgwick-build-patch.json
+          test -s bmi270-build-patch.json
+          mkdir -p early-input-build/firmware
+          "$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-strings" "$ELF" | grep -F 'early-input-geometry-v1'
+          cp .pio/build/early_trial/{bootloader.bin,partitions.bin,firmware.bin} early-input-build/firmware/
+          cp "$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin" early-input-build/firmware/
+          git rev-parse HEAD > early-input-build/source-sha.txt
+          rm early_trial_flags.h src/early_trial_build_proof.cpp early-trial-symbols.txt
+          git checkout -- platformio.ini
+          git diff --exit-code
+      - uses: actions/upload-artifact@v4
+        with:
+          name: early-input-build
+          path: early-input-build/
+          if-no-files-found: error
+          retention-days: 1
+  build-angle-early-trial:
+    needs: pages-ready
+    if: needs.pages-ready.outputs.enabled == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Fail closed unless a reviewed immutable trial SHA is pinned
+        env:
+          TRIAL_SHA: "9939ff1da6550ac9de21451c92c1106edd8b374f"
+        run: |
+          [[ "$TRIAL_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "Early trial source SHA not set"; exit 1; }
+          [[ "$TRIAL_SHA" != 0000000000000000000000000000000000000000 ]] || exit 1
+      - uses: actions/checkout@v4
+        with:
+          ref: 9939ff1da6550ac9de21451c92c1106edd8b374f
+          fetch-depth: 0
+      # Keep the immutable trial checkout at root. The verifier belongs to
+      # this pages revision and is checked out separately for this job.
+      - name: Checkout page proof verifier
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: page-proof
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify pinned source and host tests
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = 9939ff1da6550ac9de21451c92c1106edd8b374f
+          grep -q 'RUNTIME_DIAGNOSTIC_BUILD_ID "angle-early-eta-v1"' src/runtime_diagnostics.h
+          bash tools/test_runtime.sh
+      - name: Install PlatformIO and verify ELF checker
+        run: |
+          pip install platformio pyelftools==0.33
+          python3 page-proof/tools/test_verify_angle_flag_symbol.py
+      - name: Build and verify experimental angle-early firmware
+        run: |
+          set -euxo pipefail
+          # Only this job uses these flags. The forced header checks every C/C++ TU.
+          cat >> platformio.ini <<'EOF'
+
+          [env:angle_trial]
+          extends = env:atoms3cam
+          build_flags =
+            ${env:atoms3cam.build_flags}
+            -DFOOT_EARLY_TRIAL=1
+            -DANGLE_EARLY_TRIAL=1
+            -DFOOT_GEOMETRY_PROVISIONAL_EXPOSURE=0
+            -include $PROJECT_DIR/angle_trial_flags.h
+            -Wl,--undefined=angle_trial_build_flag_proof
+          EOF
+          cat > angle_trial_flags.h <<'EOF'
+          #if !defined(FOOT_EARLY_TRIAL) || FOOT_EARLY_TRIAL != 1
+          #error angle trial flag must equal 1
+          #endif
+          #if !defined(ANGLE_EARLY_TRIAL) || ANGLE_EARLY_TRIAL != 1
+          #error angle trial flag must equal 1
+          #endif
+          #if !defined(FOOT_GEOMETRY_PROVISIONAL_EXPOSURE) || FOOT_GEOMETRY_PROVISIONAL_EXPOSURE != 0
+          #error provisional geometry exposure flag must equal 0
+          #endif
+          EOF
+          cat > src/angle_trial_build_proof.cpp <<'EOF'
+          extern "C" const char angle_trial_build_flag_proof[] = "angle-trial-flags:1,1,0";
+          EOF
+          pio pkg install -e angle_trial
+          python3 tools/verify_madgwick_dependency.py --library '.pio/libdeps/angle_trial/Adafruit AHRS'
+          pio run -e angle_trial
+          python3 tools/verify_madgwick_dependency.py --library '.pio/libdeps/angle_trial/Adafruit AHRS'
+          ELF=.pio/build/angle_trial/firmware.elf
+          OBJDUMP="$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-objdump"
+          NM="$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-nm"
+          python3 tools/verify_camera_task_link.py "$ELF" --objdump "$OBJDUMP"
+          python3 tools/verify_log_encoder_link.py "$ELF" --nm "$NM"
+          python3 tools/verify_realtime_code_link.py "$ELF" --objdump "$OBJDUMP"
+          python3 tools/verify_imu_transport_link.py "$ELF" --nm "$NM"
+          python3 tools/verify_core_isolation_link.py "$ELF" --objdump "$OBJDUMP"
+          python3 tools/verify_motion_acquisition_link.py "$ELF" --objdump "$OBJDUMP"
+          "$NM" "$ELF" | grep -q '__wrap_xTaskCreatePinnedToCore'
+          for sym in cam_start cam_stop cam_take; do "$NM" "$ELF" | grep -q " $sym$"; done
+          # Verify both angle candidate functions exist and geometry task is absent.
+          "$NM" -C "$ELF" > angle-trial-symbols.txt
+          grep -E ' [tTwW] .*ExperimentRunner::tryAngleEarlyCandidate\(' angle-trial-symbols.txt
+          grep -E ' [tTwW] .*ExperimentRunner::decideAngleEarlyCandidate\(' angle-trial-symbols.txt
+          if grep -E ' [tTwW] .*foot_geometry_worker::Async::entry\(' angle-trial-symbols.txt; then echo 'geometry worker must be absent'; exit 1; fi
+          grep -E ' [rRdD] angle_trial_build_flag_proof$' angle-trial-symbols.txt
+          python3 page-proof/tools/verify_angle_flag_symbol.py "$ELF"
+          test -s madgwick-build-patch.json
+          test -s bmi270-build-patch.json
+          mkdir -p angle-early-build/firmware
+          "$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-strings" "$ELF" | grep -F 'angle-early-eta-v1'
+          cp .pio/build/angle_trial/{bootloader.bin,partitions.bin,firmware.bin} angle-early-build/firmware/
+          cp "$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin" angle-early-build/firmware/
+          git rev-parse HEAD > angle-early-build/source-sha.txt
+          rm angle_trial_flags.h src/angle_trial_build_proof.cpp angle-trial-symbols.txt
+          git checkout -- platformio.ini
+          git diff --exit-code
+      - uses: actions/upload-artifact@v4
+        with:
+          name: angle-early-build
+          path: angle-early-build/
+          if-no-files-found: error
+          retention-days: 1
+  build-site:
+    needs: [pages-ready, build-camera-diagnostics, build-foot-observation, build-early-input-trial, build-angle-early-trial]
+    if: needs.pages-ready.outputs.enabled == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Verify runtime, transfer, calibrated vision, acquisition and control math
+        run: bash tools/test_runtime.sh
+      - name: Install PlatformIO
+        run: pip install platformio
+      - name: Build lateral energy control firmware
+        run: |
+          set -euxo pipefail
+          pio pkg install -e atoms3cam
+          python3 tools/verify_madgwick_dependency.py --library ".pio/libdeps/atoms3cam/Adafruit AHRS"
+          pio run -e atoms3cam
+          python3 tools/verify_madgwick_dependency.py --library ".pio/libdeps/atoms3cam/Adafruit AHRS"
+          python3 tools/verify_camera_task_link.py .pio/build/atoms3cam/firmware.elf --objdump "$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-objdump"
+          python3 tools/verify_log_encoder_link.py .pio/build/atoms3cam/firmware.elf --nm "$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-nm"
+          python3 tools/verify_realtime_code_link.py .pio/build/atoms3cam/firmware.elf --objdump "$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-objdump"
+          python3 tools/verify_imu_transport_link.py .pio/build/atoms3cam/firmware.elf --nm "$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-nm"
+          python3 tools/verify_core_isolation_link.py .pio/build/atoms3cam/firmware.elf --objdump "$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-objdump"
+          python3 tools/verify_motion_acquisition_link.py .pio/build/atoms3cam/firmware.elf --objdump "$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-objdump"
+          test -s madgwick-build-patch.json
+          test -s bmi270-build-patch.json
+          "$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-nm" .pio/build/atoms3cam/firmware.elf | grep -q '__wrap_xTaskCreatePinnedToCore'
+          "$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-nm" .pio/build/atoms3cam/firmware.elf | grep -q ' cam_start$'
+          "$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-nm" .pio/build/atoms3cam/firmware.elf | grep -q ' cam_stop$'
+          "$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-nm" .pio/build/atoms3cam/firmware.elf | grep -q ' cam_take$'
+      - name: Assemble verified web flasher
+        run: |
+          set -euxo pipefail
+          mkdir -p _site/firmware
+          cp -R site/. _site/
+          cp .pio/build/atoms3cam/bootloader.bin _site/firmware/
+          cp .pio/build/atoms3cam/partitions.bin _site/firmware/
+          cp .pio/build/atoms3cam/firmware.bin _site/firmware/firmware-freefoot-runtime-v2.bin
+          cp "$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin" _site/firmware/
+          cp bmi270-build-patch.json madgwick-build-patch.json _site/
+          printf '%s\n' "$GITHUB_SHA" > _site/build-sha.txt
+          (cd _site/firmware && sha256sum *.bin > SHA256SUMS.txt)
+          git diff --exit-code
+      - name: Include three verified camera diagnostics
+        uses: actions/download-artifact@v4
+        with:
+          pattern: camera-mode-*
+          path: _site/camera
+      - name: Verify diagnostic assets preserve the stable flash layout
+        run: |
+          set -euxo pipefail
+          for mode in 0 1 2; do
+            d="_site/camera/camera-mode-$mode"
+            test -f "$d/index.html"
+            for file in bootloader.bin partitions.bin boot_app0.bin; do
+              cmp "_site/firmware/$file" "$d/firmware/$file"
+            done
+            python3 tools/verify_camera_pages.py --path "$d" --mode "$mode"
+          done
+      - name: Retrieve pinned foot observation build
+        uses: actions/download-artifact@v4
+        with:
+          name: foot-observation-build
+          path: foot-observation-build
+      - name: Test, package and verify independent foot diagnostic
+        run: |
+          set -euxo pipefail
+          python3 tools/test_foot_observation_page.py
+          python3 tools/foot_observation_page.py --package --source foot-observation-build --stable _site/firmware --output _site/foot-observation
+          python3 tools/foot_observation_page.py --path _site/foot-observation
+      - name: Download pinned early-input experimental firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: early-input-build
+          path: early-input-build
+      - name: Test, package and verify early-input trial
+        run: |
+          set -euxo pipefail
+          python3 tools/test_early_input_page.py
+          python3 tools/early_input_page.py --package --source early-input-build --stable _site/firmware --output _site/early-input
+          python3 tools/early_input_page.py --path _site/early-input
+      - uses: actions/download-artifact@v4
+        with:
+          name: angle-early-build
+          path: angle-early-build
+      - name: Test, package and verify angle-early trial
+        run: |
+          set -euxo pipefail
+          python3 tools/test_angle_early_page.py
+          python3 tools/angle_early_page.py --package --source angle-early-build --stable _site/firmware --output _site/angle-early
+          python3 tools/angle_early_page.py --path _site/angle-early
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build-site
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/deploy-pages@v4
+        id: deployment
+      - name: Verify live Web Flasher identity, driver provenance and binary hashes
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, time, urllib.request
+          base = os.environ['PAGE_URL'].rstrip('/') + '/'
+          expected = os.environ['EXPECTED_SHA']
+          expected_version = json.load(open('site/manifest-freefoot-runtime-v2.json'))['version']
+          def get(path):
+              request = urllib.request.Request(base + path + '?verify=' + expected,
+                                               headers={'Cache-Control': 'no-cache'})
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  return response.read()
+          last_error = None
+          for attempt in range(8):
+              try:
+                  published = get('build-sha.txt').decode().strip()
+                  if published != expected:
+                      raise ValueError('Published build SHA differs: ' + published)
+                  manifest = json.loads(get('manifest-freefoot-runtime-v2.json'))
+                  if manifest['version'] != expected_version:
+                      raise ValueError('Unexpected firmware version')
+                  if '左右揺動エネルギー制御' not in get('index.html').decode():
+                      raise ValueError('Published page label differs')
+                  provenance = json.loads(get('bmi270-build-patch.json'))
+                  if provenance['upstream_git_blob'] != '41732382bbdfe413be758748bca24d9a15a3a1d8':
+                      raise ValueError('Unexpected upstream BMI270 source')
+                  if provenance['patched_sha256'] != 'e0ac6c1bdb281647df25c57e7ebd5d848bd076f1664464a9c37191cb40bc9177':
+                      raise ValueError('Unexpected BMI270 transport patch')
+                  if provenance['header_sha256'] != 'c21d55b70e6d6ea95323780fda4e07a479d13602695099fd152e5f293adc2620':
+                      raise ValueError('Unexpected selective reader')
+                  madgwick = json.loads(get('madgwick-build-patch.json'))
+                  if madgwick['revision'] != 'madgwick_hot_04720':
+                      raise ValueError('Unexpected Madgwick execution policy')
+                  if madgwick['patched_header_sha256'] != '0cebae58337480dc02b061bd4f876cef0078a98e2a9d94e888f775aaa9eb9654':
+                      raise ValueError('Unexpected Madgwick declarations')
+                  if madgwick['policy_header_sha256'] != 'f8e5f7e091975e9b11ad1f5576f296025221e8c740ec5d2321e3838fba204a07':
+                      raise ValueError('Unexpected normal-update compiler policy')
+                  builds = manifest['builds']
+                  if len(builds) != 1 or builds[0]['chipFamily'] != 'ESP32-S3':
+                      raise ValueError('Unexpected chip manifest')
+                  expected_parts = {'firmware/bootloader.bin': 0,
+                                    'firmware/partitions.bin': 32768,
+                                    'firmware/boot_app0.bin': 57344,
+                                    'firmware/firmware-freefoot-runtime-v2.bin': 65536}
+                  parts = builds[0]['parts']
+                  if len(parts) != 4 or {p['path']: p['offset'] for p in parts} != expected_parts:
+                      raise ValueError('Unexpected flash paths or offsets')
+                  hashes = {}
+                  for line in get('firmware/SHA256SUMS.txt').decode().splitlines():
+                      digest, name = line.split(maxsplit=1)
+                      hashes[name.lstrip('*')] = digest
+                  verified = {}
+                  for path in expected_parts:
+                      content = get(path)
+                      digest = hashlib.sha256(content).hexdigest()
+                      if not content or digest != hashes[path.split('/')[-1]]:
+                          raise ValueError('Published binary checksum mismatch: ' + path)
+                      verified[path] = {'bytes': len(content), 'sha256': digest}
+                  print(json.dumps({'published_sha': published, 'version': manifest['version'],
+                                    'driver': provenance, 'madgwick': madgwick, 'verified_assets': verified}, indent=2))
+                  break
+              except Exception as error:
+                  last_error = error
+                  print('Publication check attempt', attempt + 1, 'failed:', error, flush=True)
+                  if attempt < 7:
+                      time.sleep(10)
+          else:
+              raise SystemExit('Live Web Flasher verification failed: ' + str(last_error))
+          PY
+      - name: Verify published camera diagnostics
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          set -euxo pipefail
+          for mode in 0 1 2; do
+            python3 tools/verify_camera_pages.py --url "${PAGE_URL%/}/camera/camera-mode-$mode/" --mode "$mode"
+          done
+      - name: Verify published foot observation diagnostic
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: python3 tools/foot_observation_page.py --url "${PAGE_URL%/}/foot-observation/"
+      - name: Verify published early-input trial
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: python3 tools/early_input_page.py --url "${PAGE_URL%/}/early-input/"
+      - name: Verify published angle-early trial
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: python3 tools/angle_early_page.py --url "${PAGE_URL%/}/angle-early/"

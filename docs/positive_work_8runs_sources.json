@@ -1,0 +1,42 @@
+[
+  {
+    "run": "107786469",
+    "file": "energy_control_autonomous_run_1_107786469.rwlog",
+    "sha256": "66935d6fc566273ad01bb2ff4a9fb0b60b513414baa16dde101dac54be746bf5"
+  },
+  {
+    "run": "130765421",
+    "file": "energy_control_autonomous_run_1_130765421.rwlog",
+    "sha256": "0427e22a00d7a656808ab4fc5576c0394c9dc65d264acb50a95658d332676632"
+  },
+  {
+    "run": "1_57862067",
+    "file": "energy_control_autonomous_run_1_57862067.rwlog",
+    "sha256": "91c40770f30591ff20395c27e1401a31c206dc10374248c562b7fe3a3136791c"
+  },
+  {
+    "run": "2_204492639",
+    "file": "energy_control_autonomous_run_2_204492639.rwlog",
+    "sha256": "28dc21903eee20cc8e050f97401ff30ba1d5c4850c9d9d333b6d262a421d1d1b"
+  },
+  {
+    "run": "3_374751383",
+    "file": "energy_control_autonomous_run_3_374751383.rwlog",
+    "sha256": "f617c0b4a22678130aff80b9f12ff9788043418becc92f1ac159c272856a23de"
+  },
+  {
+    "run": "4_515286401",
+    "file": "energy_control_autonomous_run_4_515286401.rwlog",
+    "sha256": "3cf2ab4d418f492b6d4a70712d96bcb29ef08f125ceeb582ca80a8d5121de5c1"
+  },
+  {
+    "run": "5_672239568",
+    "file": "energy_control_autonomous_run_5_672239568.rwlog",
+    "sha256": "861c9ed183ed33d0c35d6b9fa4d66c902d30a3ded3b6d1ab2ef0005793364e1d"
+  },
+  {
+    "run": "69890231",
+    "file": "energy_control_autonomous_run_1_69890231.rwlog",
+    "sha256": "45bbf69e168824888dcce0c5c94fa8e2aaf50c71129840b6b38ac71ecb87fcdf"
+  }
+]

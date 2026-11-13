@@ -1,0 +1,28 @@
+{
+  "name": "AtomS3R Lateral Energy Control",
+  "version": "1.0.99-alternate-foot-trial",
+  "new_install_improv_wait_time": 0,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        {
+          "path": "firmware/bootloader.bin",
+          "offset": 0
+        },
+        {
+          "path": "firmware/partitions.bin",
+          "offset": 32768
+        },
+        {
+          "path": "firmware/boot_app0.bin",
+          "offset": 57344
+        },
+        {
+          "path": "firmware/firmware-freefoot-runtime-v2.bin",
+          "offset": 65536
+        }
+      ]
+    }
+  ]
+}

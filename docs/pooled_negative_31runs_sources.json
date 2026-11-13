@@ -1,0 +1,157 @@
+[
+  {
+    "group": "broad_1",
+    "file": "energy_control_autonomous_run_1_177187652.rwlog",
+    "sha256": "7c10df73f408b3597f44cc05e37dc8105e54e71ce12d6e408f99e73482e3242c"
+  },
+  {
+    "group": "broad_2",
+    "file": "energy_control_autonomous_run_2_261329593.rwlog",
+    "sha256": "c2f88c90b4fd4dfefa40ec71a00f26569b00183f09d912f1b68f0ab239856b4e"
+  },
+  {
+    "group": "broad_3",
+    "file": "energy_control_autonomous_run_3_338778838.rwlog",
+    "sha256": "a37a6fbcb7748517fae9c539d7bd7e5e5be7d70eff5e60156b1c2c9edd86996c"
+  },
+  {
+    "group": "broad_4",
+    "file": "energy_control_autonomous_run_4_434473817.rwlog",
+    "sha256": "032cbf4c1aa5f86479876ca328a7a22978a5a525546154529a02fbb03121639a"
+  },
+  {
+    "group": "broad_5",
+    "file": "energy_control_autonomous_run_5_511614778.rwlog",
+    "sha256": "1b30a0ddfd63c02805b06ebf75c06bbd9b2fa4ab0192645f0e8ee692bbdd926a"
+  },
+  {
+    "group": "broad_6",
+    "file": "energy_control_autonomous_run_6_721215893.rwlog",
+    "sha256": "b8bf52e6251c76191632310ffd01dc91dc2a2c071aeb7721808433cd10b228b2"
+  },
+  {
+    "group": "broad_7",
+    "file": "energy_control_autonomous_run_7_1213638813.rwlog",
+    "sha256": "357def2402cc91d72b578882bf3c995e095714e9f7b6a7696b889a1784300a0d"
+  },
+  {
+    "group": "broad_8",
+    "file": "energy_control_autonomous_run_8_1905725570.rwlog",
+    "sha256": "a98cbdc0c490b25ada66eeec8779222711d110ccc11e3001b94150274755a623"
+  },
+  {
+    "group": "broad_9",
+    "file": "energy_control_autonomous_run_9_2150132481.rwlog",
+    "sha256": "cb08c7b9c8bbc57792119b448f4c76b96703a63f426365c5734ca4717d157516"
+  },
+  {
+    "group": "broad_10",
+    "file": "energy_control_autonomous_run_10_2279767791.rwlog",
+    "sha256": "424fac6c604af57f09dff601d2793984bfdfe149bedc2deaa0625f6bdff13ede"
+  },
+  {
+    "group": "broad_11",
+    "file": "energy_control_autonomous_run_11_2367281392.rwlog",
+    "sha256": "375adc66b769a27d25b57737ca233e6925dcbd9fe35b0ea8960d0e5f1206858d"
+  },
+  {
+    "group": "broad_12",
+    "file": "energy_control_autonomous_run_12_2817570734.rwlog",
+    "sha256": "5b572a273f6cb4c3b8442774c2f0911550c1433ccfda6703537e39f6c2f597df"
+  },
+  {
+    "group": "broad_13",
+    "file": "energy_control_autonomous_run_13_4227679812.rwlog",
+    "sha256": "40cfffea231d1b9748592b42edf751db435f54df4c96c3b4bacf0fd6a44eadb5"
+  },
+  {
+    "group": "broad_14",
+    "file": "energy_control_autonomous_run_14_160092587.rwlog",
+    "sha256": "08f8214df41b0826e0a18f93d1bb41ddee86808cdf59c3bc0d6937e91b09f65a"
+  },
+  {
+    "group": "broad_15",
+    "file": "energy_control_autonomous_run_1_65999706.rwlog",
+    "sha256": "40e8b8621590316fcc3fe46d7d99292d680aac8a9a95b5aa63a6087201472f36"
+  },
+  {
+    "group": "broad_16",
+    "file": "energy_control_autonomous_run_2_169141788.rwlog",
+    "sha256": "e04c17cf8a905929539e485c0c6942a17a8634e7b4e0a51468bcc3853679c27e"
+  },
+  {
+    "group": "broad_17",
+    "file": "energy_control_autonomous_run_3_260760826.rwlog",
+    "sha256": "fd9089bbedf28a0c0cfba8b11d044f221f641061a01978b0770218a96ee04798"
+  },
+  {
+    "group": "broad_18",
+    "file": "energy_control_autonomous_run_4_1059645936.rwlog",
+    "sha256": "f247da9ea6fa21c3e47a0c936e1d43b1b5a2f0ae839cd7271194eb0197ce88d4"
+  },
+  {
+    "group": "broad_19",
+    "file": "energy_control_autonomous_run_5_1211284555.rwlog",
+    "sha256": "939e230b376fa02d5a08ac2a0e88308c1d34cb69770a14a747278df84aef81a5"
+  },
+  {
+    "group": "42884626",
+    "file": "energy_control_autonomous_run_1_42884626.rwlog",
+    "sha256": "a50760dbdaedb4533e36af6440994e8fcc51ab31046ef47e775eac0392575d9b"
+  },
+  {
+    "group": "current_1_57862067",
+    "file": "energy_control_autonomous_run_1_57862067.rwlog",
+    "sha256": "91c40770f30591ff20395c27e1401a31c206dc10374248c562b7fe3a3136791c"
+  },
+  {
+    "group": "extended_1_92994373",
+    "file": "energy_control_autonomous_run_1_92994373.rwlog",
+    "sha256": "236bd2e8af615bdb7ba273a71ed6e0adef7ee31d916f98ea1a16e43bfa900722"
+  },
+  {
+    "group": "current_2_204492639",
+    "file": "energy_control_autonomous_run_2_204492639.rwlog",
+    "sha256": "28dc21903eee20cc8e050f97401ff30ba1d5c4850c9d9d333b6d262a421d1d1b"
+  },
+  {
+    "group": "extended_2_256430304",
+    "file": "energy_control_autonomous_run_2_256430304.rwlog",
+    "sha256": "00223cdbd524ee21df29050129415243b251f63954df82fdae1524b07b3b39d1"
+  },
+  {
+    "group": "current_3_374751383",
+    "file": "energy_control_autonomous_run_3_374751383.rwlog",
+    "sha256": "f617c0b4a22678130aff80b9f12ff9788043418becc92f1ac159c272856a23de"
+  },
+  {
+    "group": "extended_3_432364516",
+    "file": "energy_control_autonomous_run_3_432364516.rwlog",
+    "sha256": "25976673d78546340b8f2faa50a796e1364fb748f050fef2f788832c9e6528ba"
+  },
+  {
+    "group": "current_4_515286401",
+    "file": "energy_control_autonomous_run_4_515286401.rwlog",
+    "sha256": "3cf2ab4d418f492b6d4a70712d96bcb29ef08f125ceeb582ca80a8d5121de5c1"
+  },
+  {
+    "group": "extended_4_592431446",
+    "file": "energy_control_autonomous_run_4_592431446.rwlog",
+    "sha256": "dc056d4b05cf25283966ed2804b6c70e333148c502e633e657b0272850a4ae4a"
+  },
+  {
+    "group": "current_5_672239568",
+    "file": "energy_control_autonomous_run_5_672239568.rwlog",
+    "sha256": "861c9ed183ed33d0c35d6b9fa4d66c902d30a3ded3b6d1ab2ef0005793364e1d"
+  },
+  {
+    "group": "extended_5_746481162",
+    "file": "energy_control_autonomous_run_5_746481162.rwlog",
+    "sha256": "6d366dfb31697df238e542210eb7d981f48a26fa26f83fd47731f6c12327435d"
+  },
+  {
+    "group": "77054774",
+    "file": "energy_control_autonomous_run_1_77054774.rwlog",
+    "sha256": "37200c3b33b695a449e2deba346b380abc32879c88ac347d0fed06ec25c0d2bc"
+  }
+]

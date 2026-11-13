@@ -1,0 +1,251 @@
+{
+  "runs": 19,
+  "events": 412,
+  "leave_one_run_out": {
+    "n": 412,
+    "rmse_deg": 0.2794247614097964,
+    "bias_deg": 0.011780968007739407
+  },
+  "no_input_42884626_last5s": {
+    "n": 5,
+    "rmse_deg": 0.16486597461646385,
+    "bias_deg": 0.1024262827019431
+  },
+  "coefficients": {
+    "on": [
+      -0.11329463357993311,
+      -0.2152129258224315,
+      -0.010469117084401694,
+      0.0031760380882597666
+    ],
+    "off": [
+      0.22687838000559243,
+      0.007737655661266638,
+      0.01946049743550946,
+      -0.1300502097011045,
+      0.08070477472206143
+    ],
+    "arrival": [
+      1.3928994859988537,
+      0.09102083655301271,
+      -0.0241796709016854,
+      -0.04131838521080394,
+      0.01920426737873721,
+      0.4257706183956059
+    ]
+  },
+  "by_run": {
+    "1": {
+      "n": 21,
+      "rmse_deg": 0.2064070969422717,
+      "bias_deg": 0.11257686533745942
+    },
+    "2": {
+      "n": 22,
+      "rmse_deg": 0.16606410204471647,
+      "bias_deg": -0.053416717753666715
+    },
+    "3": {
+      "n": 22,
+      "rmse_deg": 0.20441360190591523,
+      "bias_deg": -0.05282429534877223
+    },
+    "4": {
+      "n": 22,
+      "rmse_deg": 0.2645400088444616,
+      "bias_deg": 0.2280816288156169
+    },
+    "5": {
+      "n": 22,
+      "rmse_deg": 0.456763770462079,
+      "bias_deg": 0.3858981570217534
+    },
+    "6": {
+      "n": 21,
+      "rmse_deg": 0.3366823026399985,
+      "bias_deg": -0.3103042793460172
+    },
+    "7": {
+      "n": 21,
+      "rmse_deg": 0.17862088551229693,
+      "bias_deg": -0.11401836132576786
+    },
+    "8": {
+      "n": 21,
+      "rmse_deg": 0.24044292298580788,
+      "bias_deg": -0.14715613082389062
+    },
+    "9": {
+      "n": 22,
+      "rmse_deg": 0.2625539240172023,
+      "bias_deg": 0.09144255848956284
+    },
+    "10": {
+      "n": 22,
+      "rmse_deg": 0.25499512896831034,
+      "bias_deg": 0.10106099766243336
+    },
+    "11": {
+      "n": 22,
+      "rmse_deg": 0.37197644165405946,
+      "bias_deg": 0.30157544683691045
+    },
+    "12": {
+      "n": 22,
+      "rmse_deg": 0.3061810749823476,
+      "bias_deg": -0.18465547471772928
+    },
+    "13": {
+      "n": 22,
+      "rmse_deg": 0.2795083935869082,
+      "bias_deg": -0.06052195505637863
+    },
+    "14": {
+      "n": 22,
+      "rmse_deg": 0.29855891059351825,
+      "bias_deg": 0.0627426726067949
+    },
+    "15": {
+      "n": 21,
+      "rmse_deg": 0.2787071872010124,
+      "bias_deg": -0.24967435448600656
+    },
+    "16": {
+      "n": 22,
+      "rmse_deg": 0.23100865152323283,
+      "bias_deg": -0.20390529662623713
+    },
+    "17": {
+      "n": 22,
+      "rmse_deg": 0.20628557814771978,
+      "bias_deg": -0.07261595550728214
+    },
+    "18": {
+      "n": 21,
+      "rmse_deg": 0.12401257838594479,
+      "bias_deg": -0.010267528312696294
+    },
+    "19": {
+      "n": 22,
+      "rmse_deg": 0.4020280116685122,
+      "bias_deg": 0.36393270572626407
+    }
+  },
+  "note": "No-input holdout validates only the baseline at the current state; brake effect there is not newly measured.",
+  "sources": [
+    {
+      "fixture_run": 1,
+      "file": "energy_control_autonomous_run_1_177187652.rwlog",
+      "sha256": "7c10df73f408b3597f44cc05e37dc8105e54e71ce12d6e408f99e73482e3242c",
+      "crc_verified": true
+    },
+    {
+      "fixture_run": 2,
+      "file": "energy_control_autonomous_run_2_261329593.rwlog",
+      "sha256": "c2f88c90b4fd4dfefa40ec71a00f26569b00183f09d912f1b68f0ab239856b4e",
+      "crc_verified": true
+    },
+    {
+      "fixture_run": 3,
+      "file": "energy_control_autonomous_run_3_338778838.rwlog",
+      "sha256": "a37a6fbcb7748517fae9c539d7bd7e5e5be7d70eff5e60156b1c2c9edd86996c",
+      "crc_verified": true
+    },
+    {
+      "fixture_run": 4,
+      "file": "energy_control_autonomous_run_4_434473817.rwlog",
+      "sha256": "032cbf4c1aa5f86479876ca328a7a22978a5a525546154529a02fbb03121639a",
+      "crc_verified": true
+    },
+    {
+      "fixture_run": 5,
+      "file": "energy_control_autonomous_run_5_511614778.rwlog",
+      "sha256": "1b30a0ddfd63c02805b06ebf75c06bbd9b2fa4ab0192645f0e8ee692bbdd926a",
+      "crc_verified": true
+    },
+    {
+      "fixture_run": 6,
+      "file": "energy_control_autonomous_run_6_721215893.rwlog",
+      "sha256": "b8bf52e6251c76191632310ffd01dc91dc2a2c071aeb7721808433cd10b228b2",
+      "crc_verified": true
+    },
+    {
+      "fixture_run": 7,
+      "file": "energy_control_autonomous_run_7_1213638813.rwlog",
+      "sha256": "357def2402cc91d72b578882bf3c995e095714e9f7b6a7696b889a1784300a0d",
+      "crc_verified": true
+    },
+    {
+      "fixture_run": 8,
+      "file": "energy_control_autonomous_run_8_1905725570.rwlog",
+      "sha256": "a98cbdc0c490b25ada66eeec8779222711d110ccc11e3001b94150274755a623",
+      "crc_verified": true
+    },
+    {
+      "fixture_run": 9,
+      "file": "energy_control_autonomous_run_9_2150132481.rwlog",
+      "sha256": "cb08c7b9c8bbc57792119b448f4c76b96703a63f426365c5734ca4717d157516",
+      "crc_verified": true
+    },
+    {
+      "fixture_run": 10,
+      "file": "energy_control_autonomous_run_10_2279767791.rwlog",
+      "sha256": "424fac6c604af57f09dff601d2793984bfdfe149bedc2deaa0625f6bdff13ede",
+      "crc_verified": true
+    },
+    {
+      "fixture_run": 11,
+      "file": "energy_control_autonomous_run_11_2367281392.rwlog",
+      "sha256": "375adc66b769a27d25b57737ca233e6925dcbd9fe35b0ea8960d0e5f1206858d",
+      "crc_verified": true
+    },
+    {
+      "fixture_run": 12,
+      "file": "energy_control_autonomous_run_12_2817570734.rwlog",
+      "sha256": "5b572a273f6cb4c3b8442774c2f0911550c1433ccfda6703537e39f6c2f597df",
+      "crc_verified": true
+    },
+    {
+      "fixture_run": 13,
+      "file": "energy_control_autonomous_run_13_4227679812.rwlog",
+      "sha256": "40cfffea231d1b9748592b42edf751db435f54df4c96c3b4bacf0fd6a44eadb5",
+      "crc_verified": true
+    },
+    {
+      "fixture_run": 14,
+      "file": "energy_control_autonomous_run_14_160092587.rwlog",
+      "sha256": "08f8214df41b0826e0a18f93d1bb41ddee86808cdf59c3bc0d6937e91b09f65a",
+      "crc_verified": true
+    },
+    {
+      "fixture_run": 15,
+      "file": "energy_control_autonomous_run_1_65999706.rwlog",
+      "sha256": "40e8b8621590316fcc3fe46d7d99292d680aac8a9a95b5aa63a6087201472f36",
+      "crc_verified": true
+    },
+    {
+      "fixture_run": 16,
+      "file": "energy_control_autonomous_run_2_169141788.rwlog",
+      "sha256": "e04c17cf8a905929539e485c0c6942a17a8634e7b4e0a51468bcc3853679c27e",
+      "crc_verified": true
+    },
+    {
+      "fixture_run": 17,
+      "file": "energy_control_autonomous_run_3_260760826.rwlog",
+      "sha256": "fd9089bbedf28a0c0cfba8b11d044f221f641061a01978b0770218a96ee04798",
+      "crc_verified": true
+    },
+    {
+      "fixture_run": 18,
+      "file": "energy_control_autonomous_run_4_1059645936.rwlog",
+      "sha256": "f247da9ea6fa21c3e47a0c936e1d43b1b5a2f0ae839cd7271194eb0197ce88d4",
+      "crc_verified": true
+    },
+    {
+      "fixture_run": 19,
+      "file": "energy_control_autonomous_run_5_1211284555.rwlog",
+      "sha256": "939e230b376fa02d5a08ac2a0e88308c1d34cb69770a14a747278df84aef81a5",
+      "crc_verified": true
+    }
+  ]
+}

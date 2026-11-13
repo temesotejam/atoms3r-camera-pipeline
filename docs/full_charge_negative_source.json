@@ -1,0 +1,6 @@
+{
+  "file": "energy_control_autonomous_run_1_69890231.rwlog",
+  "sha256": "45bbf69e168824888dcce0c5c94fa8e2aaf50c71129840b6b38ac71ecb87fcdf",
+  "firmware": "1.0.27-positive-energy-feedback",
+  "scope": "negative no-command events after 10 seconds; 22 events; one fixed-leg run; labels are subsequent IMU peaks; full run first held outside original 31-run model"
+}

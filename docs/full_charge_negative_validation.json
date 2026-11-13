@@ -1,0 +1,44 @@
+{
+  "original_fit_runs": 31,
+  "new_calibration_runs": 1,
+  "new_coast_events": 22,
+  "formula": "E_free_new = E_free_old + coefficient_mJ * clamp((battery_mV-8000)/100,0,1)",
+  "coefficient_mj": -0.059722516872366106,
+  "temporal_validation": {
+    "train_ms": [
+      10000,
+      20000
+    ],
+    "test_ms": [
+      20000,
+      30000
+    ],
+    "coefficient_from_train_only_mj": -0.062140075925639394,
+    "before": {
+      "n": 11,
+      "rmse_deg": 0.2991354152918204,
+      "bias_deg": 0.2508095103109463
+    },
+    "after": {
+      "n": 11,
+      "rmse_deg": 0.15874805334541534,
+      "bias_deg": -0.025549067119157408
+    }
+  },
+  "final_training_error": {
+    "n": 22,
+    "rmse_deg": 0.24233550712718518,
+    "bias_deg": 0.0031648313071372543
+  },
+  "before_all": {
+    "n": 22,
+    "rmse_deg": 0.37559299309410904,
+    "bias_deg": 0.2814989011344483
+  },
+  "runtime_voltage_range_mv": [
+    6210,
+    8120
+  ],
+  "scope": "One-run no-input calibration only. All pulse predictions above 8000 mV are cross-condition; 8120 mV is a 10 mV margin above observed whole-run maximum 8110 mV. No high-voltage braking validation or claim of reaching 8 degrees.",
+  "old_fit_predictions_unchanged": true
+}
