@@ -37,7 +37,7 @@ jobs:
           # import upstream workflows: the GitHub App token is not granted
           # workflow-file write permission, and production workflows target
           # the original repository's deployment environment.
-          git rm -r --ignore-unmatch .github/workflows/build.yml .github/workflows/pages.yml
+          git rm -rf --ignore-unmatch .github/workflows/build.yml .github/workflows/pages.yml
           cat > docs/UPSTREAM_BASELINE.md <<'EOF'
           # Imported production baseline
 
