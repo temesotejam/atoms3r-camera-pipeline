@@ -32,12 +32,20 @@ jobs:
         run: |
           mkdir -p docs
           git show FETCH_HEAD:README.md > docs/UPSTREAM_README.md
+          git show FETCH_HEAD:.github/workflows/pages.yml > docs/UPSTREAM_PAGES_WORKFLOW.yml
           git merge --allow-unrelated-histories --no-commit -X ours FETCH_HEAD
           # This repository uses its own minimal CI/Pages workflows. Do not
           # import upstream workflows: the GitHub App token is not granted
           # workflow-file write permission, and production workflows target
           # the original repository's deployment environment.
           git rm -rf --ignore-unmatch .github/workflows/build.yml .github/workflows/pages.yml
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('tools/test_madgwick_hot.py')
+          s = p.read_text()
+          s = s.replace("ROOT / '.github/workflows/pages.yml'", "ROOT / 'docs/UPSTREAM_PAGES_WORKFLOW.yml'")
+          p.write_text(s)
+          PY
           cat > docs/UPSTREAM_BASELINE.md <<'EOF'
           # Imported production baseline
 
