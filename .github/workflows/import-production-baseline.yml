@@ -19,27 +19,22 @@ jobs:
           ref: work/latency-investigation
           fetch-depth: 0
 
-      - name: Preserve project investigation notes
+      - name: Fetch the complete production Git history
         run: |
-          mkdir -p /tmp/project-notes/docs
-          cp README.md /tmp/project-notes/README.md
-          cp docs/INVESTIGATION_PLAN.md /tmp/project-notes/docs/
-          cp docs/BASELINE_SOURCE_MAP.md /tmp/project-notes/docs/
+          git fetch --no-tags https://github.com/temesotejam/atoms3r-lateral-energy-control.git ec5faa49766187cb552523d8c234f6a6bba61224
+          test "$(git rev-parse FETCH_HEAD)" = "ec5faa49766187cb552523d8c234f6a6bba61224"
 
-      - name: Fetch the exact production baseline
+      - name: Merge the production source tree without changing its behavior
         run: |
-          git clone https://github.com/temesotejam/atoms3r-lateral-energy-control.git /tmp/production
-          cd /tmp/production
-          git checkout ec5faa49766187cb552523d8c234f6a6bba61224
-          test "$(git rev-parse HEAD)" = "ec5faa49766187cb552523d8c234f6a6bba61224"
-
-      - name: Import the complete production tree
-        run: |
-          rsync -a --delete --exclude='.git' /tmp/production/ ./
-          cp /tmp/production/README.md docs/UPSTREAM_README.md
-          cp /tmp/project-notes/README.md README.md
-          cp /tmp/project-notes/docs/INVESTIGATION_PLAN.md docs/
-          cp /tmp/project-notes/docs/BASELINE_SOURCE_MAP.md docs/
+          mkdir -p docs
+          git show FETCH_HEAD:README.md > docs/UPSTREAM_README.md
+          git merge --allow-unrelated-histories --no-commit FETCH_HEAD || true
+          if git ls-files -u | grep -q .; then
+            # The project README explains the purpose of this isolated repo;
+            # preserve it while retaining the upstream README as documentation.
+            git checkout --ours README.md
+            git add README.md
+          fi
           cat > docs/UPSTREAM_BASELINE.md <<'EOF'
           # Imported production baseline
 
@@ -48,12 +43,13 @@ jobs:
           Source branch at import: main
           Import date: 2026-11-13
 
-          The complete tracked source tree at this commit was imported without
-          changing production firmware behavior. Camera pipeline experiments
-          must be isolated from the non-camera control, estimator, IMU, motor,
-          and logging behavior. This imported baseline is the reference for
-          all subsequent diffs.
+          The production commit and its Git ancestry are merged into this
+          isolated repository. The camera pipeline work must preserve all
+          non-camera control, estimator, IMU, motor, and logging behavior.
+          This imported commit is the reference for subsequent diffs.
           EOF
+          git add -A
+          git status --short
 
       - name: Run existing host regression suite
         run: bash tools/test_runtime.sh
@@ -68,10 +64,9 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
           if git diff --cached --quiet; then
             echo "No baseline changes to import."
             exit 0
           fi
-          git commit -m "Import production baseline ec5faa4 without behavior changes"
+          git commit -m "Merge production baseline ec5faa4 with full upstream history"
           git push origin HEAD:work/latency-investigation
