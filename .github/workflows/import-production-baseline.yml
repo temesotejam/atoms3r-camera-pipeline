@@ -19,6 +19,11 @@ jobs:
           ref: work/latency-investigation
           fetch-depth: 0
 
+      - name: Configure import identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
       - name: Fetch the complete production Git history
         run: |
           git fetch --no-tags https://github.com/temesotejam/atoms3r-lateral-energy-control.git ec5faa49766187cb552523d8c234f6a6bba61224
@@ -28,13 +33,7 @@ jobs:
         run: |
           mkdir -p docs
           git show FETCH_HEAD:README.md > docs/UPSTREAM_README.md
-          git merge --allow-unrelated-histories --no-commit FETCH_HEAD || true
-          if git ls-files -u | grep -q .; then
-            # The project README explains the purpose of this isolated repo;
-            # preserve it while retaining the upstream README as documentation.
-            git checkout --ours README.md
-            git add README.md
-          fi
+          git merge --allow-unrelated-histories --no-commit -X ours FETCH_HEAD
           cat > docs/UPSTREAM_BASELINE.md <<'EOF'
           # Imported production baseline
 
@@ -43,13 +42,12 @@ jobs:
           Source branch at import: main
           Import date: 2026-11-13
 
-          The production commit and its Git ancestry are merged into this
-          isolated repository. The camera pipeline work must preserve all
+          The production commit and its complete Git ancestry are merged into
+          this isolated repository. The camera pipeline work must preserve all
           non-camera control, estimator, IMU, motor, and logging behavior.
           This imported commit is the reference for subsequent diffs.
           EOF
           git add -A
-          git status --short
 
       - name: Run existing host regression suite
         run: bash tools/test_runtime.sh
@@ -62,8 +60,6 @@ jobs:
 
       - name: Commit imported baseline to the isolated branch
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if git diff --cached --quiet; then
             echo "No baseline changes to import."
             exit 0
