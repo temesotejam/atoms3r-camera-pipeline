@@ -1,0 +1,77 @@
+name: Import production baseline
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/import-production-baseline.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out the isolated development branch
+        uses: actions/checkout@v4
+        with:
+          ref: work/latency-investigation
+          fetch-depth: 0
+
+      - name: Preserve project investigation notes
+        run: |
+          mkdir -p /tmp/project-notes/docs
+          cp README.md /tmp/project-notes/README.md
+          cp docs/INVESTIGATION_PLAN.md /tmp/project-notes/docs/
+          cp docs/BASELINE_SOURCE_MAP.md /tmp/project-notes/docs/
+
+      - name: Fetch the exact production baseline
+        run: |
+          git clone https://github.com/temesotejam/atoms3r-lateral-energy-control.git /tmp/production
+          cd /tmp/production
+          git checkout ec5faa49766187cb552523d8c234f6a6bba61224
+          test "$(git rev-parse HEAD)" = "ec5faa49766187cb552523d8c234f6a6bba61224"
+
+      - name: Import the complete production tree
+        run: |
+          rsync -a --delete --exclude='.git' /tmp/production/ ./
+          cp /tmp/production/README.md docs/UPSTREAM_README.md
+          cp /tmp/project-notes/README.md README.md
+          cp /tmp/project-notes/docs/INVESTIGATION_PLAN.md docs/
+          cp /tmp/project-notes/docs/BASELINE_SOURCE_MAP.md docs/
+          cat > docs/UPSTREAM_BASELINE.md <<'EOF'
+          # Imported production baseline
+
+          Source repository: https://github.com/temesotejam/atoms3r-lateral-energy-control
+          Source commit: ec5faa49766187cb552523d8c234f6a6bba61224
+          Source branch at import: main
+          Import date: 2026-11-13
+
+          The complete tracked source tree at this commit was imported without
+          changing production firmware behavior. Camera pipeline experiments
+          must be isolated from the non-camera control, estimator, IMU, motor,
+          and logging behavior. This imported baseline is the reference for
+          all subsequent diffs.
+          EOF
+
+      - name: Run existing host regression suite
+        run: bash tools/test_runtime.sh
+
+      - name: Build the ESP32-S3 firmware
+        run: |
+          python3 -m pip install --user platformio
+          export PATH="$HOME/.local/bin:$PATH"
+          pio run
+
+      - name: Commit imported baseline to the isolated branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No baseline changes to import."
+            exit 0
+          fi
+          git commit -m "Import production baseline ec5faa4 without behavior changes"
+          git push origin HEAD:work/latency-investigation
