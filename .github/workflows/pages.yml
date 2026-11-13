@@ -1,0 +1,152 @@
+name: Camera pipeline web flasher
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: camera-pipeline-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout validated production baseline
+        uses: actions/checkout@v4
+        with:
+          ref: work/latency-investigation
+          fetch-depth: 0
+
+      - name: Verify imported baseline identity
+        run: |
+          grep -q 'ec5faa49766187cb552523d8c234f6a6bba61224' docs/UPSTREAM_BASELINE.md
+          test -f src/main.cpp
+          test -f src/experiment_runner.cpp
+          test -f src/mekf6.cpp
+          test -f src/roller485_manager.cpp
+
+      - name: Run original host regression suite
+        run: bash tools/test_runtime.sh
+
+      - name: Install PlatformIO
+        run: python3 -m pip install --user platformio
+
+      - name: Build unchanged ESP32-S3 production firmware
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          pio pkg install -e atoms3cam
+          pio run -e atoms3cam
+
+      - name: Assemble web flasher
+        run: |
+          mkdir -p _site/firmware
+          cp .pio/build/atoms3cam/bootloader.bin _site/firmware/
+          cp .pio/build/atoms3cam/partitions.bin _site/firmware/
+          cp .pio/build/atoms3cam/firmware.bin _site/firmware/
+          cp "$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin" _site/firmware/
+          (cd _site/firmware && sha256sum *.bin > SHA256SUMS.txt)
+          printf '%s\n' "$(git rev-parse HEAD)" > _site/source-sha.txt
+          cat > _site/manifest.json <<'EOF'
+          {
+            "name": "AtomS3R Camera Pipeline - Production Baseline",
+            "version": "baseline-ec5faa4",
+            "new_install_prompt_erase": false,
+            "builds": [{
+              "chipFamily": "ESP32-S3",
+              "parts": [
+                {"path": "firmware/bootloader.bin", "offset": 0},
+                {"path": "firmware/partitions.bin", "offset": 32768},
+                {"path": "firmware/boot_app0.bin", "offset": 57344},
+                {"path": "firmware/firmware.bin", "offset": 65536}
+              ]
+            }]
+          }
+          EOF
+          cat > _site/index.html <<'EOF'
+          <!doctype html>
+          <html lang="ja">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width,initial-scale=1">
+            <meta name="theme-color" content="#111827">
+            <title>AtomS3R Camera Pipeline</title>
+            <style>
+              body{margin:0;background:#0b1220;color:#e5e7eb;font:16px/1.7 system-ui,sans-serif}
+              main{max-width:760px;margin:48px auto;padding:24px}
+              section{background:#172033;border:1px solid #334155;border-radius:16px;padding:24px;margin:20px 0}
+              h1{line-height:1.2}button{width:100%;padding:16px;border:0;border-radius:10px;background:#2563eb;color:white;font-size:1.05rem;font-weight:700;cursor:pointer}
+              code{color:#93c5fd}small{color:#cbd5e1}
+            </style>
+            <script type="module" src="https://unpkg.com/esp-web-tools@10.1.1/dist/web/install-button.js?module"></script>
+          </head>
+          <body><main>
+            <h1>AtomS3R Camera Pipeline</h1>
+            <p>AtomS3R-CAM / ESP32-S3 用 Web Serial ファームウェア書き込みページ</p>
+            <section>
+              <h2>安定版：元の歩行制御・推定機能を含む基準ファームウェア</h2>
+              <p>元リポジトリの検証済みソースを基準にビルドしています。カメラ改善実験はまだ含みません。</p>
+              <esp-web-install-button manifest="manifest.json">
+                <button slot="activate">AtomS3R-CAM に書き込む</button>
+                <span slot="unsupported">PC版ChromeまたはEdgeで開いてください。</span>
+              </esp-web-install-button>
+              <p><small>USB接続後、ボタンを押してAtomS3R-CAMのポートを選択してください。通常の更新ではErase deviceを選択しないでください。</small></p>
+            </section>
+            <section>
+              <h2>ビルド情報</h2>
+              <p>元ソース：<code>temesotejam/atoms3r-lateral-energy-control</code></p>
+              <p>基準コミット：<code>ec5faa49766187cb552523d8c234f6a6bba61224</code></p>
+              <p>取り込み先コミット：<code id="source">確認中</code></p>
+              <p><a href="firmware/SHA256SUMS.txt">ファームウェア SHA-256</a></p>
+            </section>
+            <script>
+              fetch('source-sha.txt').then(r=>r.text()).then(t=>document.getElementById('source').textContent=t.trim()).catch(()=>{});
+            </script>
+          </main></body></html>
+          EOF
+
+      - name: Verify package layout and binary hashes
+        run: |
+          python3 - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          root=Path('_site')
+          m=json.loads((root/'manifest.json').read_text())
+          assert m['builds'][0]['chipFamily']=='ESP32-S3'
+          parts=m['builds'][0]['parts']
+          assert [p['offset'] for p in parts]==[0,32768,57344,65536]
+          for p in parts:
+              f=root/p['path']
+              assert f.is_file() and f.stat().st_size>0, p['path']
+          for line in (root/'firmware/SHA256SUMS.txt').read_text().splitlines():
+              digest,name=line.split(maxsplit=1)
+              f=root/'firmware'/name.strip().lstrip('*')
+              assert hashlib.sha256(f.read_bytes()).hexdigest()==digest, f
+          print('ESP32-S3 manifest, flash offsets, binary assets and SHA-256 verified')
+          PY
+
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-24.04
+    needs: build
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment
